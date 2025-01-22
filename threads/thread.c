@@ -1,6 +1,5 @@
 #include "thread.h"
 #include <debug.h>
-#include <math.h>
 #include <stddef.h>
 #include <random.h>
 #include <stdio.h>
@@ -12,6 +11,7 @@
 #include "switch.h"
 #include "synch.h"
 #include "vaddr.h"
+#include "../devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -121,6 +121,13 @@ thread_start (void)
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
 void
+thread_timer_sleep_checker(struct thread *t, void *aux)
+{
+    if (t->sleep_time ==  timer_ticks())
+        thread_unblock(t);
+}
+
+void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
@@ -135,6 +142,7 @@ thread_tick (void)
   else
     kernel_ticks++;
 
+  thread_foreach(thread_timer_sleep_checker, NULL);
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
