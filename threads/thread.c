@@ -8,6 +8,7 @@
 #include "interrupt.h"
 #include "intr-stubs.h"
 #include "palloc.h"
+#include "stdbool.h"
 #include "switch.h"
 #include "synch.h"
 #include "vaddr.h"
@@ -38,6 +39,7 @@ static struct thread *initial_thread;
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
 
+static bool ifSleep = 0;
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
   {
@@ -45,6 +47,13 @@ struct kernel_thread_frame
     thread_func *function;      /* Function to call. */
     void *aux;                  /* Auxiliary data for function. */
   };
+
+struct sleepHandlerHelper
+{
+    struct thread *thread;
+    int priority;
+    bool flag;
+};
 
 /* Statistics. */
 static long long idle_ticks;    /* # of timer ticks spent idle. */
@@ -118,15 +127,45 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
-/* Called by the timer interrupt handler at each timer tick.
-   Thus, this function runs in an external interrupt context. */
-void
+static void
 thread_timer_sleep_checker(struct thread *t, void *aux)
 {
+    
+    /*
     if (t->sleep_time ==  timer_ticks())
         thread_unblock(t);
+    */
+}
+static void
+thread_wakeScheduler(struct thread *t, struct sleepHandlerHelper *helper)
+{
+    helper->flag = 0;
+    if ( t->sleep_time == timer_ticks()){
+        if( t->priority >= helper->priority){
+            helper->priority = t->priority;
+            helper->thread = t;
+        }
+
+        helper->flag = 1;
+    }
 }
 
+static void
+thread_handleSleep()
+{
+    struct sleepHandlerHelper helper;
+    helper.priority = 0;
+    helper.flag = 1;
+
+    enum intr_level old_level = intr_disable();
+    while(helper.flag){
+        thread_foreach(&thread_wakeScheduler, &helper);
+        thread_unblock(helper.thread);
+    }
+    intr_set_level(old_level);
+}
+/* Called by the timer interrupt handler at each timer tick.
+   Thus, this function runs in an external interrupt context. */
 void
 thread_tick (void) 
 {
@@ -142,7 +181,7 @@ thread_tick (void)
   else
     kernel_ticks++;
 
-  thread_foreach(thread_timer_sleep_checker, NULL);
+  thread_handleSleep();
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
