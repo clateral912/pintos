@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
+#include "list.h"
 #include "pit.h"
 #include "../threads/interrupt.h"
 #include "../threads/synch.h"
@@ -84,6 +85,17 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
+bool
+timer_compareSleepPriority(const struct list_elem *sleep_elem1, const struct list_elem *sleep_elem2, void *aux)
+{
+    ASSERT(sleep_elem1 != NULL);
+    ASSERT(sleep_elem2 != NULL);
+    
+    struct thread *t1 = list_entry(sleep_elem1, struct thread, sleep_elem);
+    struct thread *t2 = list_entry(sleep_elem2, struct thread, sleep_elem);
+
+    return t1->priority > t2->priority ? 1 : 0;
+}
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
@@ -95,18 +107,22 @@ timer_sleep (int64_t ticks)
     struct thread *t = thread_current();
 
     ASSERT (intr_get_level () == INTR_ON);
-    old_level = intr_disable();
-    
-    if (ticks > 0){
-        t->sleep_time = ticks + timer_ticks();
-        thread_block();
-    }
-    else {
-        t->sleep_time = 0;
-    }
 
-    intr_set_level(old_level);
-  /*
+    if (ticks > 0)
+    {
+        t->sleep_time = timer_ticks() + ticks;
+
+        list_push_back(&sleep_list, &t->sleep_elem); 
+        list_sort(&sleep_list, timer_compareSleepPriority, NULL);
+
+        old_level = intr_disable();
+
+        thread_block();
+
+        intr_set_level(old_level);
+
+    }
+     /*
   while (timer_elapsed (start) < ticks) 
     thread_yield ();
 

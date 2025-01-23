@@ -7,6 +7,7 @@
 #include "flags.h"
 #include "interrupt.h"
 #include "intr-stubs.h"
+#include "list.h"
 #include "palloc.h"
 #include "stdbool.h"
 #include "switch.h"
@@ -30,6 +31,7 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+struct list sleep_list;
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -39,7 +41,6 @@ static struct thread *initial_thread;
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
 
-static bool ifSleep = 0;
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
   {
@@ -48,12 +49,6 @@ struct kernel_thread_frame
     void *aux;                  /* Auxiliary data for function. */
   };
 
-struct sleepHandlerHelper
-{
-    struct thread *thread;
-    int priority;
-    bool flag;
-};
 
 /* Statistics. */
 static long long idle_ticks;    /* # of timer ticks spent idle. */
@@ -102,7 +97,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-
+  list_init (&sleep_list);
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -136,33 +131,28 @@ thread_timer_sleep_checker(struct thread *t, void *aux)
         thread_unblock(t);
     */
 }
+
 static void
-thread_wakeScheduler(struct thread *t, struct sleepHandlerHelper *helper)
+thread_wakeUp(int64_t wakeTime)
 {
-    helper->flag = 0;
-    if ( t->sleep_time == timer_ticks()){
-        if( t->priority >= helper->priority){
-            helper->priority = t->priority;
-            helper->thread = t;
+    struct list_elem *e;
+
+    if (list_empty(&sleep_list))
+        return ;
+
+    for(e = list_begin(&sleep_list); e != list_end(&sleep_list); ){
+        struct thread *t = list_entry(e, struct thread, sleep_elem);
+        struct list_elem *next = e->next;
+
+        printf("%lld Sleep Time", t->sleep_time);
+        if (t->sleep_time == wakeTime)
+        {
+            list_remove(e);
+            thread_unblock(t);    
         }
 
-        helper->flag = 1;
+        e = next;
     }
-}
-
-static void
-thread_handleSleep()
-{
-    struct sleepHandlerHelper helper;
-    helper.priority = 0;
-    helper.flag = 1;
-
-    enum intr_level old_level = intr_disable();
-    while(helper.flag){
-        thread_foreach(&thread_wakeScheduler, &helper);
-        thread_unblock(helper.thread);
-    }
-    intr_set_level(old_level);
 }
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
@@ -170,7 +160,7 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
-
+  int64_t wakeTime = timer_ticks();
   /* Update statistics. */
   if (t == idle_thread)
     idle_ticks++;
@@ -181,7 +171,7 @@ thread_tick (void)
   else
     kernel_ticks++;
 
-  thread_handleSleep();
+  thread_wakeUp(wakeTime);
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
