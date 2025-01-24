@@ -147,6 +147,10 @@ sema_self_test (void)
 static void
 sema_test_helper (void *sema_) 
 {
+  // 必须对void *sema_进行显示类型转换，因为void *类型不带有类型信息
+  // 也就没有长度信息，因此用下标访问void *类型的变量是不合法的， 例如：
+  // *sema_[0] (INVALID)，而将其转换为struct semaphore *类型后，有了长度信息
+  // 就可以使用下标访问
   struct semaphore *sema = sema_;
   int i;
 
