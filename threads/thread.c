@@ -122,14 +122,32 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
+/* 在thread_tick()中运行，检查ready_list中是否存在优先级比自己高的线程
+ * 如果有, 那么立即让出CPU
+ * 注意! 我们要求ready_list是按照优先级降序排列的!
+ * 运行该函数前需要保证ready_list是有序的!
+ * */
 static void
-thread_timer_sleep_checker(struct thread *t, void *aux)
+thread_yield_on_priority (void)
 {
-    
-    /*
-    if (t->sleep_time ==  timer_ticks())
-        thread_unblock(t);
-    */
+  struct thread *current = thread_current();
+  struct thread *t;
+  struct list_elem *e;
+
+  enum intr_level old_level = intr_disable();
+
+  for (e = list_begin(&ready_list); e != &(current->elem); e = list_next(e))
+  {
+    t = list_entry(e, struct thread, elem);
+
+    if (t->priority > current->priority)
+    {
+      thread_yield();
+      break;
+    }
+  }
+
+  intr_set_level(old_level);
 }
 
 void
@@ -152,6 +170,20 @@ thread_iterate_ready_list()
     }
     
 }
+
+// 用于比较两个线程优先级的辅助函数
+bool
+thread_compare_priority(const struct list_elem *elem1, const struct list_elem *elem2, void *aux UNUSED)
+{
+    ASSERT(elem1 != NULL);
+    ASSERT(elem2 != NULL);
+    
+    struct thread *t1 = list_entry(elem1, struct thread, elem);
+    struct thread *t2 = list_entry(elem2, struct thread, elem);
+
+    return t1->priority > t2->priority ? 1 : 0;
+}
+
 static void
 thread_wakeUp(int64_t wakeTime)
 {
@@ -191,7 +223,12 @@ thread_tick (void)
   else
     kernel_ticks++;
 
-  thread_wakeUp(wakeTime);
+  list_sort(&ready_list, &thread_compare_priority, NULL);
+  thread_yield_on_priority();
+
+  /*alarm-clock则需要启用wakeUp函数
+   *thread_wakeUp(wakeTime);
+   */
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
