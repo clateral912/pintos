@@ -136,7 +136,7 @@ thread_yield_on_priority (void)
 
   enum intr_level old_level = intr_disable();
 
-  for (e = list_begin(&ready_list); e != &(current->elem); e = list_next(e))
+  for (e = list_begin(&ready_list); e != &(current->elem) && e != list_end(&ready_list); e = list_next(e))
   {
     t = list_entry(e, struct thread, elem);
 
@@ -223,8 +223,6 @@ thread_tick (void)
   else
     kernel_ticks++;
 
-  list_sort(&ready_list, &thread_compare_priority, NULL);
-  thread_yield_on_priority();
 
   /*alarm-clock则需要启用wakeUp函数
    *thread_wakeUp(wakeTime);
