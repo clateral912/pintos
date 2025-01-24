@@ -50,7 +50,6 @@ alarm_priority_thread (void *aux UNUSED)
      we can call timer_sleep() without worrying about races
      between checking the time and a timer interrupt. */
   timer_sleep (wake_time - timer_ticks ());
-
   /* Print a message on wake-up. */
   msg ("Thread %s woke up.", thread_name ());
 

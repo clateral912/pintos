@@ -25,7 +25,7 @@
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
-static struct list ready_list;
+struct list ready_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -75,7 +75,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-
+void thread_iterate_ready_list(void);
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -132,6 +132,26 @@ thread_timer_sleep_checker(struct thread *t, void *aux)
     */
 }
 
+void
+thread_iterate_ready_list()
+{
+    struct list_elem *e;
+    struct thread *thread_now = thread_current();
+
+    if (strcmp(thread_now->name, "idle") == 0)
+        return ;
+
+    printf("-----Ready List Interation Called By %s -----\n", thread_now->name);
+
+    enum thread_status running_status = THREAD_RUNNING;
+    for (e = list_begin(&ready_list); e != list_end(&ready_list); ){
+        struct thread *t = list_entry(e, struct thread, elem);
+        //if (!strcmp(t->name, "main") && !strcmp(t->name, "idle"))
+            printf("ready list No. %s\n", t->name);
+        e = e->next;
+    }
+    
+}
 static void
 thread_wakeUp(int64_t wakeTime)
 {
@@ -144,9 +164,9 @@ thread_wakeUp(int64_t wakeTime)
         struct thread *t = list_entry(e, struct thread, sleep_elem);
         struct list_elem *next = e->next;
 
-        printf("%lld Sleep Time", t->sleep_time);
         if (t->sleep_time == wakeTime)
         {
+            // printf("Priority %d, current time = %lld, woke up\n", t->priority, wakeTime);
             list_remove(e);
             thread_unblock(t);    
         }
@@ -253,6 +273,7 @@ thread_block (void)
 {
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
+    
 
   thread_current ()->status = THREAD_BLOCKED;
   schedule ();
@@ -347,6 +368,8 @@ thread_yield (void)
   old_level = intr_disable ();
   if (cur != idle_thread) 
     list_push_back (&ready_list, &cur->elem);
+
+
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -531,10 +554,10 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (list_empty (&ready_list))
-    return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    if (list_empty (&ready_list))
+        return idle_thread;
+    else
+        return list_entry (list_pop_front (&ready_list), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -600,6 +623,7 @@ schedule (void)
   ASSERT (intr_get_level () == INTR_OFF);
   ASSERT (cur->status != THREAD_RUNNING);
   ASSERT (is_thread (next));
+
 
   if (cur != next)
     prev = switch_threads (cur, next);
