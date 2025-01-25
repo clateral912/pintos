@@ -122,7 +122,10 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
-/* 在thread_tick()中运行，检查ready_list中是否存在优先级比自己高的线程
+bool
+thread_compare_priority(const struct list_elem *elem1, const struct list_elem *elem2, void *aux UNUSED);
+
+/* 调用者为正在运行的线程，检查ready_list中是否存在优先级比自己高的线程
  * 如果有, 那么立即让出CPU
  * 注意! 我们要求ready_list是按照优先级降序排列的!
  * 运行该函数前需要保证ready_list是有序的!
@@ -135,8 +138,10 @@ thread_yield_on_priority (void)
   struct list_elem *e;
 
   enum intr_level old_level = intr_disable();
+  
+  list_sort(&ready_list, thread_compare_priority, NULL);
 
-  for (e = list_begin(&ready_list); e != &(current->elem) && e != list_end(&ready_list); e = list_next(e))
+  for (e = list_begin(&ready_list);  e != list_end(&ready_list); e = list_next(e))
   {
     t = list_entry(e, struct thread, elem);
 
@@ -145,6 +150,9 @@ thread_yield_on_priority (void)
       thread_yield();
       break;
     }
+
+    if (t->priority == current->priority)
+      break;
   }
 
   intr_set_level(old_level);
@@ -224,9 +232,7 @@ thread_tick (void)
     kernel_ticks++;
 
 
-  /*alarm-clock则需要启用wakeUp函数
-   *thread_wakeUp(wakeTime);
-   */
+  thread_wakeUp(wakeTime);
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
@@ -293,7 +299,7 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
-
+  thread_yield_on_priority();
   return tid;
 }
 
@@ -432,6 +438,7 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  thread_yield_on_priority();
 }
 
 /* Returns the current thread's priority. */
