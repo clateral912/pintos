@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "interrupt.h"
+#include "list.h"
 #include "thread.h"
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
@@ -68,7 +69,8 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      //list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered(&sema->waiters, &thread_current()->elem, thread_compare_priority, NULL);
       thread_block ();
     }
   sema->value--;
@@ -113,10 +115,16 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+  
   sema->value++;
+
+  if (!list_empty (&sema->waiters)){
+    struct thread *t = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
+    thread_unblock (t);
+    if (thread_pri_sch)
+      thread_yield_on_priority();
+  }
+
   intr_set_level (old_level);
 }
 
@@ -200,6 +208,17 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  // 注意! 此处必须检查锁的状态, 如果锁是无主的(即, 这个锁是第一次被acquire)
+  // 那么lock->holder为空指针! 用lock->holder->priority访问是不合法的!
+  // 会造成页面错误!
+  if (thread_pri_sch && lock->holder != NULL)
+  {
+    struct thread *t = thread_current();
+    if (t->priority > lock->holder->priority)
+    {
+      lock->holder->priority = t->priority;
+    }
+  }
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 }
@@ -235,6 +254,7 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  lock->holder->priority = lock->holder->base_priority;
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }

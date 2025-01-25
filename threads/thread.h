@@ -88,6 +88,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int base_priority;
     int64_t sleep_time;
     struct list_elem allelem;           /* List element for all threads list. */
     /* Shared between thread.c and synch.c. */
@@ -107,6 +108,7 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 extern struct list sleep_list;
+extern bool thread_pri_sch;
 
 void thread_init (void);
 void thread_start (void);
@@ -131,6 +133,8 @@ void thread_yield (void);
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *, void *);
 
+void thread_yield_on_priority (void);
+bool thread_compare_priority (const struct list_elem *elem1, const struct list_elem *elem2, void *aux UNUSED);
 int thread_get_priority (void);
 void thread_set_priority (int);
 

@@ -55,6 +55,7 @@ static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
 
+bool thread_pri_sch;
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
@@ -130,7 +131,7 @@ thread_compare_priority(const struct list_elem *elem1, const struct list_elem *e
  * 注意! 我们要求ready_list是按照优先级降序排列的!
  * 运行该函数前需要保证ready_list是有序的!
  * */
-static void
+void
 thread_yield_on_priority (void)
 {
   struct thread *current = thread_current();
@@ -139,7 +140,7 @@ thread_yield_on_priority (void)
 
   enum intr_level old_level = intr_disable();
   
-  list_sort(&ready_list, thread_compare_priority, NULL);
+  //list_sort(&ready_list, thread_compare_priority, NULL);
 
   for (e = list_begin(&ready_list);  e != list_end(&ready_list); e = list_next(e))
   {
@@ -180,6 +181,7 @@ thread_iterate_ready_list()
 }
 
 // 用于比较两个线程优先级的辅助函数
+// 当elem1 对应线程的优先级严格大于elem2的线程优先级时. 返回true
 bool
 thread_compare_priority(const struct list_elem *elem1, const struct list_elem *elem2, void *aux UNUSED)
 {
@@ -189,7 +191,7 @@ thread_compare_priority(const struct list_elem *elem1, const struct list_elem *e
     struct thread *t1 = list_entry(elem1, struct thread, elem);
     struct thread *t2 = list_entry(elem2, struct thread, elem);
 
-    return t1->priority > t2->priority ? 1 : 0;
+    return t1->priority > t2->priority ;
 }
 
 static void
@@ -337,7 +339,8 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list, &t->elem, thread_compare_priority, NULL);
+  //list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -391,6 +394,7 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
   intr_disable ();
   list_remove (&thread_current()->allelem);
+  list_remove (&thread_current()->elem);
   thread_current ()->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
@@ -408,7 +412,8 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered(&ready_list, &cur->elem, thread_compare_priority, NULL);
+    //list_push_back (&ready_list, &cur->elem);
 
 
   cur->status = THREAD_READY;
@@ -438,6 +443,7 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  thread_current ()->base_priority = new_priority;
   thread_yield_on_priority();
 }
 
@@ -568,6 +574,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->base_priority = priority;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
@@ -600,6 +607,24 @@ next_thread_to_run (void)
         return idle_thread;
     else
         return list_entry (list_pop_front (&ready_list), struct thread, elem);
+}
+
+//当遵循最严格的优先级调度时, 没有必要切换到idle线程, 因为
+//idle线程的优先级为0, main线程的优先级总比它高, 而且不可能存在main线程
+//退出, idle线程存活的情况, 当main线程退出意味着系统关机
+static struct thread *
+next_thread_to_run_PriSch (void)
+{
+    struct thread *cur = running_thread(); 
+    if (list_empty(&ready_list))
+        return idle_thread;
+    
+    struct thread *next = list_entry(list_pop_front(&ready_list), struct thread, elem);
+
+    if (next->priority >= cur->priority || cur->status == THREAD_DYING)
+      return next;
+    else
+      return cur;
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -658,8 +683,14 @@ thread_schedule_tail (struct thread *prev)
 static void
 schedule (void) 
 {
+  struct thread *next;
   struct thread *cur = running_thread ();
-  struct thread *next = next_thread_to_run ();
+
+  if (thread_pri_sch)
+    next = next_thread_to_run_PriSch();
+  else
+    next = next_thread_to_run ();
+  
   struct thread *prev = NULL;
 
   ASSERT (intr_get_level () == INTR_OFF);

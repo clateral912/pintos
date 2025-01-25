@@ -114,7 +114,7 @@ pintos_init (void)
   exception_init ();
   syscall_init ();
 #endif
-
+  thread_pri_sch = 0;
   /* Start thread scheduler and enable interrupts. */
   thread_start ();
   serial_init_queue ();
@@ -130,6 +130,7 @@ pintos_init (void)
   printf ("Boot complete.\n");
   printf ("kituro from here!\n");
   
+  thread_pri_sch = 1;
   if (*argv != NULL) {
     /* Run actions specified on kernel command line. */
     run_actions (argv);

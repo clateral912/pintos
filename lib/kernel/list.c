@@ -442,6 +442,12 @@ list_sort (struct list *list, list_less_func *less, void *aux)
 /* Inserts ELEM in the proper position in LIST, which must be
    sorted according to LESS given auxiliary data AUX.
    Runs in O(n) average case in the number of elements in LIST. */
+// less(elem A, elem B), 当A严格小于B时返回ture, 其余情况false
+// 当要插入的elem小于某个元素e时, 停止循环
+// 并且将elem插入到e的前面
+// 实际上, less()函数完全可用在A > B时返回True, 实现相反的功能:
+// 在elem严格大于e时, 将elem插入到e的前面, 这也是我们实现
+// ready_list按照优先级降序排列的算法.
 void
 list_insert_ordered (struct list *list, struct list_elem *elem,
                      list_less_func *less, void *aux)
