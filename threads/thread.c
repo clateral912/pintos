@@ -393,9 +393,9 @@ thread_exit (void)
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
   intr_disable ();
-  list_remove (&thread_current()->allelem);
-  list_remove (&thread_current()->elem);
-  thread_current ()->status = THREAD_DYING;
+  struct thread *t = thread_current();
+  list_remove (&t->allelem);
+  t->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
 }
