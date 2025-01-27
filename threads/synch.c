@@ -42,6 +42,7 @@
 
    - up or "V": increment the value (and wake up one waiting
      thread, if any). */
+
 void
 sema_init (struct semaphore *sema, unsigned value) 
 {
@@ -206,8 +207,19 @@ lock_acquire (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
-  ASSERT (!lock_held_by_current_thread (lock));
+  ASSERT (!lock_held_by_current_thread (lock)); //避免当前线程重复两次acquire同一把锁
+  
+  if (thread_pri_sch)
+  {
+    struct thread *cur = thread_current();
 
+    if (lock->holder != NULL)
+      cur->lock_waiting = lock;
+
+    thread_recursive_set_priority(cur->priority);
+  }
+
+  /*
   // 注意! 此处必须检查锁的状态, 如果锁是无主的(即, 这个锁是第一次被acquire)
   // 那么lock->holder为空指针! 用lock->holder->priority访问是不合法的!
   // 会造成页面错误!
@@ -219,7 +231,10 @@ lock_acquire (struct lock *lock)
       lock->holder->priority = t->priority;
     }
   }
+  */
   sema_down (&lock->semaphore);
+  //此时必须清空当前线程的等待锁, 否则会在提权函数(thread_recursive_set_priority)中造成死循环
+  thread_current()->lock_waiting = NULL;
   lock->holder = thread_current ();
 }
 
@@ -254,7 +269,10 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  lock->holder->priority = lock->holder->base_priority;
+  if (thread_pri_sch)
+  {
+    lock->holder->priority = lock->holder->base_priority;
+  }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }

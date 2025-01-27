@@ -98,6 +98,8 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
 #endif
+    struct lock* lock_waiting;
+    int prev_lock_priority;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
@@ -137,7 +139,7 @@ void thread_yield_on_priority (void);
 bool thread_compare_priority (const struct list_elem *elem1, const struct list_elem *elem2, void *aux UNUSED);
 int thread_get_priority (void);
 void thread_set_priority (int);
-
+void thread_recursive_set_priority(int);
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);

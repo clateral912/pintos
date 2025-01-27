@@ -123,6 +123,29 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
+// 递归式的重设从当前线程开始的，所有线程的优先级
+// 按照等待锁的顺序, lock_waiting是当前线程正在等待获取的锁
+// 若当前线程是某个锁的持有者，lock_waiting应该为NULL
+void
+thread_recursive_set_priority(int priority)
+{
+  struct thread *cur = running_thread(); //thread_current() ?
+  struct thread *t;
+
+  if (cur->lock_waiting == NULL)
+    return ;
+  
+  for (t = cur->lock_waiting->holder; t != NULL; t = t->lock_waiting->holder)
+  {
+    if (priority > t->priority)   //是否需要判断 存疑？
+      t->priority = priority;  
+
+    if (t->lock_waiting == NULL)
+      break;
+  }
+
+}
+
 bool
 thread_compare_priority(const struct list_elem *elem1, const struct list_elem *elem2, void *aux UNUSED);
 
@@ -612,6 +635,7 @@ next_thread_to_run (void)
 //当遵循最严格的优先级调度时, 没有必要切换到idle线程, 因为
 //idle线程的优先级为0, main线程的优先级总比它高, 而且不可能存在main线程
 //退出, idle线程存活的情况, 当main线程退出意味着系统关机
+//当 当前线程的状态为阻塞或死亡（BLOCKED/DYING）时，无条件返回下一个线程继续运行
 static struct thread *
 next_thread_to_run_PriSch (void)
 {
@@ -621,7 +645,7 @@ next_thread_to_run_PriSch (void)
     
     struct thread *next = list_entry(list_pop_front(&ready_list), struct thread, elem);
 
-    if (next->priority >= cur->priority || cur->status == THREAD_DYING)
+    if (next->priority >= cur->priority || cur->status == THREAD_DYING || cur->status == THREAD_BLOCKED )
       return next;
     else
       return cur;
