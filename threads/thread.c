@@ -129,6 +129,17 @@ thread_receive_donation(struct thread *t, int priority)
   t->priority = priority;
 }
 
+static bool
+thread_exist_donation(struct thread *t)
+{
+  for (int k = 0; k < t->lock_cnt; k++)
+  {
+    if (t->lock_holding[k]->if_donated)
+      return true; 
+  }
+  return false;
+
+}
 // 将锁添加到线程的持有锁序列中，表明线程现在持有该锁
 // 该函数应该在lock_acquire()的末尾处运行
 void
@@ -177,12 +188,18 @@ thread_restore_priority(struct thread *t, struct lock *lock)
   // 如果当前线程持有锁A，锁A被某个高优先级线程需要
   // 此时当前线程不能擅自将自己的优先级降低！
   // 下面的代码用于检测当前线程持有的锁中是否存在
-  // 这样的锁, 如果存在，那么直接返回，不对当前线程的优先级做任何操作
+  // 这样的锁, 如果存在，那么将当前线程的优先级设置为该锁的优先级之后返回
 
   for (int k = 0; k < t->lock_cnt; k++)
   {
     if (t->lock_holding[k]->if_donated)
+    {
+      if (t->priority > t->lock_holding[k]->priority && (lock->if_donated))
+        t->priority = t->lock_holding[k]->priority;
+      
       return ; 
+    }
+     
   }
   
 
@@ -544,9 +561,10 @@ thread_set_priority (int new_priority)
   struct thread *t = thread_current();
 
   t->base_priority = new_priority;
-  if (t->lock_waiting == NULL)
+  //if (t->lock_waiting == NULL)
+  // t->priority = new_priority;
+  if (!thread_exist_donation(t))
     t->priority = new_priority;
-
   thread_yield_on_priority();
 }
 
