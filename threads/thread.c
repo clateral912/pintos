@@ -123,6 +123,24 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
+void
+thread_receive_donation(struct thread *t, int priority)
+{
+  t->pri_stack_ptr += 1;
+  t->priority_stack[t->pri_stack_ptr] = priority;
+  t->priority = priority;
+}
+
+void
+thread_restore_priority(struct thread *t)
+{
+  /*
+  if (t->pri_stack_ptr > 0)
+    t->pri_stack_ptr -= 1;
+  */
+  t->priority = t->priority_stack[0];
+}
+
 // 递归式的重设从当前线程开始的，所有线程的优先级
 // 按照等待锁的顺序, lock_waiting是当前线程正在等待获取的锁
 // 若当前线程是某个锁的持有者，lock_waiting应该为NULL
@@ -138,7 +156,8 @@ thread_recursive_set_priority(int priority)
   for (t = cur->lock_waiting->holder; t != NULL; t = t->lock_waiting->holder)
   {
     if (priority > t->priority)   //是否需要判断 存疑？
-      t->priority = priority;  
+      thread_receive_donation(t, priority);
+      // t->priority = priority;  
 
     if (t->lock_waiting == NULL)
       break;
@@ -465,8 +484,13 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
-  thread_current ()->base_priority = new_priority;
+  struct thread *t = thread_current();
+
+  if (t->pri_stack_ptr == 0)
+    t->priority = new_priority;
+
+  t->priority_stack[0] = new_priority;
+
   thread_yield_on_priority();
 }
 
@@ -597,8 +621,9 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
-  t->base_priority = priority;
+  t->priority_stack[0] = priority;
   t->magic = THREAD_MAGIC;
+  t->pri_stack_ptr = 0;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

@@ -190,6 +190,7 @@ lock_init (struct lock *lock)
 {
   ASSERT (lock != NULL);
 
+  lock->if_donate = 0;
   lock->holder = NULL;
   sema_init (&lock->semaphore, 1);
 }
@@ -213,8 +214,10 @@ lock_acquire (struct lock *lock)
   {
     struct thread *cur = thread_current();
 
-    if (lock->holder != NULL)
+    if (lock->holder != NULL){
+      lock->if_donate = 1;  
       cur->lock_waiting = lock;
+    }
 
     thread_recursive_set_priority(cur->priority);
   }
@@ -269,9 +272,11 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (thread_pri_sch)
+  struct thread *t = thread_current();
+  if (thread_pri_sch && lock->if_donate && (!list_empty(&lock->semaphore.waiters)))
   {
-    lock->holder->priority = lock->holder->base_priority;
+      thread_restore_priority(t);
+    //lock->holder->priority = lock->holder->base_priority;
   }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
