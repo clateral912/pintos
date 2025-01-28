@@ -126,19 +126,76 @@ thread_start (void)
 void
 thread_receive_donation(struct thread *t, int priority)
 {
-  t->pri_stack_ptr += 1;
-  t->priority_stack[t->pri_stack_ptr] = priority;
   t->priority = priority;
 }
 
+// 将锁添加到线程的持有锁序列中，表明线程现在持有该锁
+// 该函数应该在lock_acquire()的末尾处运行
 void
-thread_restore_priority(struct thread *t)
+thread_add_holding_lock(struct thread *t, struct lock *lock)
 {
-  /*
-  if (t->pri_stack_ptr > 0)
-    t->pri_stack_ptr -= 1;
-  */
-  t->priority = t->priority_stack[0];
+
+  ASSERT(t->lock_cnt < MAX_LOCKS); // 确保数组不会越界
+  t->lock_holding[t->lock_cnt++] = lock;
+  // 在序列末尾添加锁
+}
+
+// 线程释放锁时需要进行的操作：
+// 1. 将锁从自己的lock_holding序列中移除
+// 2. 将自己的优先级进行调整
+void
+thread_restore_priority(struct thread *t, struct lock *lock)
+{
+  // 当前必然持有锁
+  ASSERT(t->lock_cnt > 0)
+
+  bool lock_found = false;
+  bool if_donated = false;
+
+  for (int j = 0; j < t->lock_cnt; j++)
+  {
+    if (lock == t->lock_holding[j])
+    {
+      // 将最后一个元素搬运到即将删掉的元素处
+      t->lock_holding[j] = t->lock_holding[--t->lock_cnt];
+      t->lock_holding[t->lock_cnt] = NULL;
+      lock_found = true;
+      // 清空最后一个元素
+    }
+  }
+
+  ASSERT(lock_found)
+
+  // 如果上面的操作移除的是该线程持有的最后一把锁，那么该线程的优先级
+  // 调整为最开始的基准优先级
+  if (t->lock_cnt == 0)
+  {
+    t->priority = t->base_priority;
+    return ;
+  }
+
+  // 如果当前线程持有锁A，锁A被某个高优先级线程需要
+  // 此时当前线程不能擅自将自己的优先级降低！
+  // 下面的代码用于检测当前线程持有的锁中是否存在
+  // 这样的锁, 如果存在，那么直接返回，不对当前线程的优先级做任何操作
+
+  for (int k = 0; k < t->lock_cnt; k++)
+  {
+    if (t->lock_holding[k]->if_donated)
+      return ; 
+  }
+  
+
+  // 筛选出持有的锁当中优先级最高的那个，并将线程的优先级调整为该锁的优先级
+  int max_priority = t->lock_holding[0]->priority;
+
+  for (int i = 0; i < t->lock_cnt; i++)
+  {
+    if(t->lock_holding[i]->priority > max_priority)
+      max_priority = t->lock_holding[i]->priority;
+  }
+
+  t->priority = max_priority; 
 }
 
 // 递归式的重设从当前线程开始的，所有线程的优先级
@@ -176,7 +233,7 @@ thread_compare_priority(const struct list_elem *elem1, const struct list_elem *e
 void
 thread_yield_on_priority (void)
 {
-  struct thread *current = thread_current();
+  struct thread *cur = thread_current();
   struct thread *t;
   struct list_elem *e;
 
@@ -188,13 +245,13 @@ thread_yield_on_priority (void)
   {
     t = list_entry(e, struct thread, elem);
 
-    if (t->priority > current->priority)
+    if (t->priority > cur->priority)
     {
       thread_yield();
       break;
     }
 
-    if (t->priority == current->priority)
+    if (t->priority == cur->priority)
       break;
   }
 
@@ -486,10 +543,9 @@ thread_set_priority (int new_priority)
 {
   struct thread *t = thread_current();
 
-  if (t->pri_stack_ptr == 0)
+  t->base_priority = new_priority;
+  if (t->lock_waiting == NULL)
     t->priority = new_priority;
-
-  t->priority_stack[0] = new_priority;
 
   thread_yield_on_priority();
 }
@@ -621,10 +677,10 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
-  t->priority_stack[0] = priority;
+  t->base_priority = priority;
   t->magic = THREAD_MAGIC;
-  t->pri_stack_ptr = 0;
-
+  t->lock_cnt = 0;
+  memset(&t->lock_holding, 0, sizeof(t->lock_holding));
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
