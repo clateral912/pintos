@@ -162,11 +162,14 @@ thread_restore_priority(struct thread *t, struct lock *lock)
 
   bool lock_found = false;
   bool if_donated = false;
+  bool deleted_donated_lock = false;
 
   for (int j = 0; j < t->lock_cnt; j++)
   {
     if (lock == t->lock_holding[j])
     {
+      if (t->lock_holding[j]->if_donated)
+        deleted_donated_lock = true;
       // 将最后一个元素搬运到即将删掉的元素处
       t->lock_holding[j] = t->lock_holding[--t->lock_cnt];
       t->lock_holding[t->lock_cnt] = NULL;
@@ -194,7 +197,7 @@ thread_restore_priority(struct thread *t, struct lock *lock)
   {
     if (t->lock_holding[k]->if_donated)
     {
-      if (t->priority > t->lock_holding[k]->priority && (lock->if_donated))
+      if (t->priority > t->lock_holding[k]->priority && (deleted_donated_lock))
         t->priority = t->lock_holding[k]->priority;
       
       return ; 
