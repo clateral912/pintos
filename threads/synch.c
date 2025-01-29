@@ -121,6 +121,8 @@ sema_up (struct semaphore *sema)
   sema->value++;
 
   if (!list_empty (&sema->waiters)){
+    // 保证此时sema的等待队列是按优先级降序排列的
+    list_sort((&sema->waiters), thread_compare_priority, NULL);
     struct thread *t = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
     thread_unblock (t);
     if (thread_pri_sch)
