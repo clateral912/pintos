@@ -112,8 +112,9 @@ timer_sleep (int64_t ticks)
     {
         t->sleep_time = timer_ticks() + ticks;
 
-        list_push_back(&sleep_list, &t->sleep_elem); 
-        list_sort(&sleep_list, timer_compareSleepPriority, NULL);
+        // list_push_back(&sleep_list, &t->sleep_elem); 
+        list_insert_ordered(&sleep_list, &t->sleep_elem, timer_compareSleepPriority, NULL);
+        // list_sort(&sleep_list, timer_compareSleepPriority, NULL);
 
         old_level = intr_disable();
 
