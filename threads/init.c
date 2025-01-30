@@ -70,6 +70,7 @@ static void locate_block_devices (void);
 static void locate_block_device (enum block_type, const char *name);
 #endif
 
+bool finish_init;
 int pintos_init (void) NO_RETURN;
 
 /* Pintos main entry point. */
@@ -77,7 +78,7 @@ int
 pintos_init (void)
 {
   char **argv;
-
+  finish_init = 0;
   /* Clear BSS. */  
   bss_init ();
 
@@ -126,11 +127,12 @@ pintos_init (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
-
   printf ("Boot complete.\n");
   printf ("kituro from here!\n");
   
+  finish_init = 1;
   thread_pri_sch = 1;
+
   if (*argv != NULL) {
     /* Run actions specified on kernel command line. */
     run_actions (argv);

@@ -81,6 +81,10 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 void thread_iterate_ready_list(void);
+int thread_update_ready_threads(void);
+int thread_calc_priority(struct thread *);
+int thread_calc_recent_cpu(struct thread *);
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -559,7 +563,12 @@ int
 thread_update_ready_threads(void)
 {
   // 包含当前正在运行的线程(THREAD_READY + THREAD_RUNNING)
-  ready_threads = (int)(list_size(&ready_list)) + 1;
+  // 若当前线程为idle线程, 则说明没有正在运行的线程, 此时不+1
+  if (strcmp((const char *)running_thread()->name, "idle"))
+    ready_threads = (int)(list_size(&ready_list)) + 1;
+  else
+    ready_threads = (int)(list_size(&ready_list));
+  // 若没有正在运行的线程, 则不+1
 
   return ready_threads;
 }
@@ -568,7 +577,10 @@ int
 thread_calc_sys_load_avg(void)
 {
   thread_update_ready_threads();
-  load_avg_fp = fp_multiply(load_avg_fp, LOADAVG_COEFF_59_60) + fp_multiply_by_int(LOADAVG_COEFF_01_60, ready_threads); 
+  load_avg_fp = fp_add(
+                fp_multiply(load_avg_fp, LOADAVG_COEFF_59_60), 
+                fp_multiply_by_int(LOADAVG_COEFF_01_60, ready_threads)
+                ); 
   return load_avg_fp;
 }
 /* Returns 100 times the system load average. */
@@ -576,7 +588,7 @@ int
 thread_get_load_avg (void) 
 {
   /* Not yet implemented. */
-  return fp_multiply_by_int(load_avg_fp, 100);
+  return fp_convert_to_int_rdn(fp_multiply_by_int(load_avg_fp, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -593,8 +605,10 @@ thread_update_cur_recent_cpu(void)
 {
   struct thread *cur = thread_current();
   
-  if (!strcmp(&cur->name, "idle"))
-    cur->recent_cpu_fp = fp_add_int(cur->recent_cpu_fp, 1);
+  if (!strcmp((const char *)&cur->name, "idle"))
+    return ;
+  
+  cur->recent_cpu_fp = fp_add_int(cur->recent_cpu_fp, 1);
 }
 
 
@@ -603,11 +617,14 @@ thread_update_cur_recent_cpu(void)
 int
 thread_calc_priority(struct thread *t)
 {
-  t->priority = PRI_MAX - fp_divide_by_int(t->recent_cpu_fp, 4) - (t->nice * 2);
+  t->priority = PRI_MAX - fp_convert_to_int_rdn(fp_divide_by_int(t->recent_cpu_fp, 4)) - (t->nice * 2);
+
+  ASSERT(t->priority >= PRI_MIN && t->priority <= PRI_MAX)
+
   return t->priority;
 }
 // 根据load_avg和nice重新计算单个线程的recent_cpu
-void
+int
 thread_calc_recent_cpu(struct thread *t)
 {
   int coeff_fp = fp_convert_to_int_rdn(
@@ -622,6 +639,8 @@ thread_calc_recent_cpu(struct thread *t)
                         fp_multiply(coeff_fp, t->recent_cpu_fp), 
                         t->nice
                         );
+
+  return t->recent_cpu_fp;
 }
 
 // 为每个线程重新计算recent_cpu
