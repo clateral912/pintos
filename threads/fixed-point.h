@@ -95,7 +95,7 @@ fp_divide(int32_t x, int32_t y)
 inline int32_t 
 fp_divide_by_int(int32_t x, int32_t n)
 {
-  return x / n;
+  return (int)(x / n);
 }
 
 #endif //FIXED_POINT_H

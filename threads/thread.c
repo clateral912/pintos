@@ -619,7 +619,9 @@ thread_calc_priority(struct thread *t)
 {
   t->priority = PRI_MAX - fp_convert_to_int_rdn(fp_divide_by_int(t->recent_cpu_fp, 4)) - (t->nice * 2);
 
-  ASSERT(t->priority >= PRI_MIN && t->priority <= PRI_MAX)
+  // ASSERT(t->priority >= PRI_MIN && t->priority <= PRI_MAX)
+  if (!(t->priority >= PRI_MIN && t->priority <= PRI_MAX))
+    return 0;
 
   return t->priority;
 }
@@ -627,12 +629,10 @@ thread_calc_priority(struct thread *t)
 int
 thread_calc_recent_cpu(struct thread *t)
 {
-  int coeff_fp = fp_convert_to_int_rdn(
-                  fp_divide(
-                      fp_multiply_by_int(load_avg_fp, 2), 
-                      fp_add_int(
-                            fp_multiply_by_int(load_avg_fp, 2), 1)
-                      )
+  int coeff_fp = fp_divide(
+                  fp_multiply_by_int(load_avg_fp, 2), 
+                  fp_add_int(
+                        fp_multiply_by_int(load_avg_fp, 2), 1)
                   );  
 
   t->recent_cpu_fp = fp_add_int(
