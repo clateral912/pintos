@@ -123,23 +123,13 @@ thread_start (void)
   sema_down (&idle_started);
 }
 
+// 接受优先级捐赠，更改当前优先级
 void
 thread_receive_donation(struct thread *t, int priority)
 {
   t->priority = priority;
 }
 
-static bool
-thread_exist_donation(struct thread *t)
-{
-  for (int k = 0; k < t->lock_cnt; k++)
-  {
-    if (t->lock_holding[k]->if_donated)
-      return true; 
-  }
-  return false;
-
-}
 // 将锁添加到线程的持有锁序列中，表明线程现在持有该锁
 // 该函数应该在lock_acquire()的末尾处运行
 void
@@ -161,15 +151,11 @@ thread_restore_priority(struct thread *t, struct lock *lock)
   ASSERT(t->lock_cnt > 0)
 
   bool lock_found = false;
-  bool if_donated = false;
-  bool deleted_donated_lock = false;
 
   for (int j = 0; j < t->lock_cnt; j++)
   {
     if (lock == t->lock_holding[j])
     {
-      if (t->lock_holding[j]->if_donated)
-        deleted_donated_lock = true;
       // 将最后一个元素搬运到即将删掉的元素处
       t->lock_holding[j] = t->lock_holding[--t->lock_cnt];
       t->lock_holding[t->lock_cnt] = NULL;
@@ -187,24 +173,6 @@ thread_restore_priority(struct thread *t, struct lock *lock)
     t->priority = t->base_priority;
     return ;
   }
-
-  // 如果当前线程持有锁A，锁A被某个高优先级线程需要
-  // 此时当前线程不能擅自将自己的优先级降低！
-  // 下面的代码用于检测当前线程持有的锁中是否存在
-  // 这样的锁, 如果存在，那么将当前线程的优先级设置为该锁的优先级之后返回
-
-  for (int k = 0; k < t->lock_cnt; k++)
-  {
-    if (t->lock_holding[k]->if_donated)
-    {
-      if (t->priority > t->lock_holding[k]->priority && (deleted_donated_lock))
-        t->priority = t->lock_holding[k]->priority;
-      
-      return ; 
-    }
-     
-  }
-  
 
   // 筛选出持有的锁当中优先级最高的那个，并将线程的优先级调整为该锁的优先级
   int max_priority = t->lock_holding[0]->priority;
@@ -232,9 +200,14 @@ thread_recursive_set_priority(int priority)
   
   for (t = cur->lock_waiting->holder; t != NULL; t = t->lock_waiting->holder)
   {
-    if (priority > t->priority)   //是否需要判断 存疑？
+    if (priority > t->priority)
+    {
+      if(t->lock_waiting != NULL)
+        t->lock_waiting->priority = priority;
+
       thread_receive_donation(t, priority);
-      // t->priority = priority;  
+    }   
+    //是否需要判断 存疑？
 
     if (t->lock_waiting == NULL)
       break;
@@ -276,27 +249,6 @@ thread_yield_on_priority (void)
   }
 
   intr_set_level(old_level);
-}
-
-void
-thread_iterate_ready_list()
-{
-    struct list_elem *e;
-    struct thread *thread_now = thread_current();
-
-    if (strcmp(thread_now->name, "idle") == 0)
-        return ;
-
-    printf("-----Ready List Interation Called By %s -----\n", thread_now->name);
-
-    enum thread_status running_status = THREAD_RUNNING;
-    for (e = list_begin(&ready_list); e != list_end(&ready_list); ){
-        struct thread *t = list_entry(e, struct thread, elem);
-        //if (!strcmp(t->name, "main") && !strcmp(t->name, "idle"))
-            printf("ready list No. %s\n", t->name);
-        e = e->next;
-    }
-    
 }
 
 // 用于比较两个线程优先级的辅助函数
@@ -561,13 +513,15 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  struct thread *t = thread_current();
+  struct thread *cur = thread_current();
+  
+  // 如果当前的priority与基准priority不一致，说明当前线程接受了捐赠
+  // 当且仅当base_priority与priority一致时，才更改当前线程的priority
+  if (cur->base_priority == cur->priority)
+    cur->priority = new_priority;
 
-  t->base_priority = new_priority;
-  //if (t->lock_waiting == NULL)
-  // t->priority = new_priority;
-  if (!thread_exist_donation(t))
-    t->priority = new_priority;
+  cur->base_priority = new_priority;
+
   thread_yield_on_priority();
 }
 
