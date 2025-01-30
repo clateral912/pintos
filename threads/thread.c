@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stddef.h>
 #include <random.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "flags.h"
@@ -13,6 +14,7 @@
 #include "switch.h"
 #include "synch.h"
 #include "vaddr.h"
+#include "fixed-point.h"
 #include "../devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -64,6 +66,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
+int ready_threads;
+int load_avg_fp;
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -99,6 +103,8 @@ thread_init (void)
   list_init (&ready_list);
   list_init (&all_list);
   list_init (&sleep_list);
+  if (thread_mlfqs)
+    load_avg_fp = 0;
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -513,17 +519,20 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  struct thread *cur = thread_current();
+  if(!thread_mlfqs)
+  {
+    struct thread *cur = thread_current();
   
-  // 如果当前的priority与基准priority不一致，说明当前线程接受了捐赠
-  // 当且仅当base_priority与priority一致时，才更改当前线程的priority
-  if (cur->base_priority == cur->priority)
-    cur->priority = new_priority;
+    // 如果当前的priority与基准priority不一致，说明当前线程接受了捐赠
+    // 当且仅当base_priority与priority一致时，才更改当前线程的priority
+    if (cur->base_priority == cur->priority)
+      cur->priority = new_priority;
 
-  cur->base_priority = new_priority;
+    cur->base_priority = new_priority;
 
-  thread_yield_on_priority();
-}
+    thread_yield_on_priority();
+  }
+ }
 
 /* Returns the current thread's priority. */
 int
@@ -531,36 +540,118 @@ thread_get_priority (void)
 {
   return thread_current ()->priority;
 }
-
 /* Sets the current thread's nice value to NICE. */
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  thread_current()->nice = nice;
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
+// 重新计算当前系统已经就绪的线程数量
+int 
+thread_update_ready_threads(void)
+{
+  // 包含当前正在运行的线程(THREAD_READY + THREAD_RUNNING)
+  ready_threads = (int)(list_size(&ready_list)) + 1;
+
+  return ready_threads;
+}
+// 计算系统平均负载, 应该每秒重新计算一次
+int
+thread_calc_sys_load_avg(void)
+{
+  thread_update_ready_threads();
+  load_avg_fp = fp_multiply(load_avg_fp, LOADAVG_COEFF_59_60) + fp_multiply_by_int(LOADAVG_COEFF_01_60, ready_threads); 
+  return load_avg_fp;
+}
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return fp_multiply_by_int(load_avg_fp, 100);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  struct thread *cur = thread_current();
+  return fp_convert_to_int_rdn(fp_multiply_by_int(cur->recent_cpu_fp, 100));
+}
+
+// 每个tick更新一次recent_cpu_fp(自增1)
+void 
+thread_update_cur_recent_cpu(void)
+{
+  struct thread *cur = thread_current();
+  
+  if (!strcmp(&cur->name, "idle"))
+    cur->recent_cpu_fp = fp_add_int(cur->recent_cpu_fp, 1);
+}
+
+
+// 重新计算单个线程的优先级
+// 应该每4个tick运行一次.
+int
+thread_calc_priority(struct thread *t)
+{
+  t->priority = PRI_MAX - fp_divide_by_int(t->recent_cpu_fp, 4) - (t->nice * 2);
+  return t->priority;
+}
+// 根据load_avg和nice重新计算单个线程的recent_cpu
+void
+thread_calc_recent_cpu(struct thread *t)
+{
+  int coeff_fp = fp_convert_to_int_rdn(
+                  fp_divide(
+                      fp_multiply_by_int(load_avg_fp, 2), 
+                      fp_add_int(
+                            fp_multiply_by_int(load_avg_fp, 2), 1)
+                      )
+                  );  
+
+  t->recent_cpu_fp = fp_add_int(
+                        fp_multiply(coeff_fp, t->recent_cpu_fp), 
+                        t->nice
+                        );
+}
+
+// 为每个线程重新计算recent_cpu
+// 应该每秒运行一次
+void
+thread_calc_all_recent_cpu(void)
+{
+  struct list_elem *e;
+  struct thread *t;
+
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+  {
+    t = list_entry(e, struct thread, allelem);
+    thread_calc_recent_cpu(t);
+  }
+}
+
+// 为每个线程重新计算Priority
+// 应该每4个tick运行一次
+void 
+thread_calc_all_priority(void)
+{
+  struct list_elem *e;
+  struct thread *t;
+
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+  {
+    t = list_entry(e, struct thread, allelem);
+    thread_calc_priority(t);
+  }
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -651,11 +742,16 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
-  t->base_priority = priority;
   t->magic = THREAD_MAGIC;
+
+  t->base_priority = priority;
+  t->priority = priority;
   t->lock_cnt = 0;
   memset(&t->lock_holding, 0, sizeof(t->lock_holding));
+  
+  t->nice = 0;
+  t->recent_cpu_fp = 0;
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);

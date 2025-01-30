@@ -102,6 +102,8 @@ struct thread
     struct lock* lock_waiting;
     struct lock* lock_holding[MAX_LOCKS]; 
     int lock_cnt;
+    int nice;
+    int recent_cpu_fp;
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
@@ -110,8 +112,11 @@ struct thread
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+extern int load_avg_fp;
+extern int ready_threads;
 extern struct list sleep_list;
 extern bool thread_pri_sch;
+extern struct list ready_list;
 
 void thread_init (void);
 void thread_start (void);
@@ -144,6 +149,11 @@ bool thread_compare_priority (const struct list_elem *elem1, const struct list_e
 int thread_get_priority (void);
 void thread_set_priority (int);
 void thread_recursive_set_priority(int);
+
+int thread_calc_sys_load_avg(void);
+void thread_update_cur_recent_cpu(void);
+void thread_calc_all_recent_cpu(void);
+void thread_calc_all_priority(void);
 
 int thread_get_nice (void);
 void thread_set_nice (int);

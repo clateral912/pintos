@@ -205,6 +205,26 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  if (thread_mlfqs)
+  {
+    // 每1 tick
+    thread_update_cur_recent_cpu();
+
+    // 每4 tick
+    if (!(ticks % 4))
+    {
+      thread_calc_all_priority();
+      list_sort(&ready_list, thread_compare_priority, NULL);
+    }
+    
+    // 每1秒钟
+    if (!(ticks % TIMER_FREQ))
+    {
+      thread_calc_sys_load_avg();
+      thread_calc_all_recent_cpu();
+    } 
+  }
+     
   thread_tick ();
 }
 

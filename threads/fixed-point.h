@@ -5,6 +5,20 @@
 
 #define FRACTION_BITS 14
 #define FRACTION_SCALE (1 << FRACTION_BITS)
+#define LOADAVG_COEFF_59_60 16111
+#define LOADAVG_COEFF_01_60 273
+
+int32_t fp_convert_to_fp(int32_t n);
+int32_t fp_convert_to_int_rdn(int32_t x);
+int32_t fp_convert_to_int_rd0(int32_t x);
+int32_t fp_add(int32_t x, int32_t y);
+int32_t fp_add_int(int32_t x, int32_t n);
+int32_t fp_sub(int32_t x, int32_t y);
+int32_t fp_sub_int(int32_t x, int32_t n);
+int32_t fp_multiply(int32_t x, int32_t y);
+int32_t fp_multiply_by_int(int32_t x, int32_t n);
+int32_t fp_divide(int32_t x, int32_t y);
+int32_t fp_divide_by_int(int32_t x, int32_t n);
 
 // 将整数转换为定点数
 inline int32_t 
