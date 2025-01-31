@@ -357,6 +357,7 @@ thread_create (const char *name, int priority,
   ASSERT (function != NULL);
 
   /* Allocate thread. */
+  // 每个线程的内存空间只能是4KB : 因为只给每个线程分配了一页内存!
   t = palloc_get_page (PAL_ZERO);
   if (t == NULL)
     return TID_ERROR;
@@ -784,6 +785,7 @@ alloc_frame (struct thread *t, size_t size)
   /* Stack data is always allocated in word-size units. */
   ASSERT (is_thread (t));
   ASSERT (size % sizeof (uint32_t) == 0);
+  // size必须是8个字节的整数倍
 
   t->stack -= size;
   return t->stack;

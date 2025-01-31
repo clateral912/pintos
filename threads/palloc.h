@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 
+// 枚举类型的常量都是2的幂, 方便进行位运算来组合多个标志位
+// enum palloc_flags flag = PAL_ASSERT | PAL_ZERO 这种赋值是合法的!
 /* How to allocate pages. */
 enum palloc_flags
   {

@@ -1,22 +1,22 @@
-#include "userprog/process.h"
+#include "process.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "userprog/gdt.h"
-#include "userprog/pagedir.h"
-#include "userprog/tss.h"
-#include "filesys/directory.h"
-#include "filesys/file.h"
-#include "filesys/filesys.h"
-#include "threads/flags.h"
-#include "threads/init.h"
-#include "threads/interrupt.h"
-#include "threads/palloc.h"
-#include "threads/thread.h"
-#include "threads/vaddr.h"
+#include "gdt.h"
+#include "pagedir.h"
+#include "tss.h"
+#include "../filesys/directory.h"
+#include "../filesys/file.h"
+#include "../filesys/filesys.h"
+#include "../threads/flags.h"
+#include "../threads/init.h"
+#include "../threads/interrupt.h"
+#include "../threads/palloc.h"
+#include "../threads/thread.h"
+#include "../threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -33,12 +33,16 @@ process_execute (const char *file_name)
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
+  // 为进程名称分配一页内存, 避免两个线程的竞争(?)
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+  // 指定缓冲区的大小为PGSIZE(一页内存的大小), 确保名字不会超过这个大小
 
   /* Create a new thread to execute FILE_NAME. */
+  // PintOS 只能支持单线程的进程
+  // fn_copy将会是start_process()函数的参数
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
@@ -62,6 +66,7 @@ start_process (void *file_name_)
   success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
+  // load()执行完毕, 则把之前分配的内存释放
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
@@ -72,7 +77,7 @@ start_process (void *file_name_)
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
-  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+  __asm__ volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
 

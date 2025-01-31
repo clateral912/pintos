@@ -95,10 +95,10 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
     struct list_elem sleep_elem;
-#ifdef USERPROG
+//#ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
-#endif
+//#endif
     struct lock* lock_waiting;
     struct lock* lock_holding[MAX_LOCKS]; 
     int lock_cnt;

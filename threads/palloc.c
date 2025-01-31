@@ -1,4 +1,4 @@
-#include "threads/palloc.h"
+#include "palloc.h"
 #include <bitmap.h>
 #include <debug.h>
 #include <inttypes.h>
@@ -7,9 +7,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "threads/loader.h"
-#include "threads/synch.h"
-#include "threads/vaddr.h"
+#include "loader.h"
+#include "synch.h"
+#include "vaddr.h"
 
 /* Page allocator.  Hands out memory in page-size (or
    page-multiple) chunks.  See malloc.h for an allocator that
@@ -77,10 +77,12 @@ palloc_get_multiple (enum palloc_flags flags, size_t page_cnt)
   if (page_cnt == 0)
     return NULL;
 
+  // page_idx是alloc到的内存的第一页, 是整段内存的起始端(该内存的起始页框号)
   lock_acquire (&pool->lock);
   page_idx = bitmap_scan_and_flip (pool->used_map, 0, page_cnt, false);
   lock_release (&pool->lock);
 
+  // 将页框号转换为虚拟地址
   if (page_idx != BITMAP_ERROR)
     pages = pool->base + PGSIZE * page_idx;
   else
@@ -120,6 +122,8 @@ palloc_free_multiple (void *pages, size_t page_cnt)
   struct pool *pool;
   size_t page_idx;
 
+  // 保证pages这个地址的低12位一定为0 (保证page一定是页框号)
+  // (即, 保证page一定指向一个内存页面的起始位置, 而不是内存页面内的某个位置)
   ASSERT (pg_ofs (pages) == 0);
   if (pages == NULL || page_cnt == 0)
     return;
@@ -137,8 +141,10 @@ palloc_free_multiple (void *pages, size_t page_cnt)
   memset (pages, 0xcc, PGSIZE * page_cnt);
 #endif
 
+  // 保证bitmap对应的page位都为1(都正在被使用)
   ASSERT (bitmap_all (pool->used_map, page_idx, page_cnt));
   bitmap_set_multiple (pool->used_map, page_idx, page_cnt, false);
+  // 将bitmap的对应位设置为0 (释放内存页面)
 }
 
 /* Frees the page at PAGE. */
@@ -156,6 +162,7 @@ init_pool (struct pool *p, void *base, size_t page_cnt, const char *name)
   /* We'll put the pool's used_map at its base.
      Calculate the space needed for the bitmap
      and subtract it from the pool's size. */
+  // 内存池的最低部分(最下面几页)被用来存储bitmap数据结构, 记录内存池使用情况
   size_t bm_pages = DIV_ROUND_UP (bitmap_buf_size (page_cnt), PGSIZE);
   if (bm_pages > page_cnt)
     PANIC ("Not enough memory in %s for bitmap.", name);
@@ -174,9 +181,12 @@ init_pool (struct pool *p, void *base, size_t page_cnt, const char *name)
 static bool
 page_from_pool (const struct pool *pool, void *page) 
 {
+  // pg_no 返回页面的编号, 具体来说是将page的地址右12位得到页框号
   size_t page_no = pg_no (page);
   size_t start_page = pg_no (pool->base);
   size_t end_page = start_page + bitmap_size (pool->used_map);
+  // bitmap中的每一位都对应内存的一个页面
+  // bitmap->bit_cnt即为该bitmap所管理的内存页面的数量
 
   return page_no >= start_page && page_no < end_page;
 }
