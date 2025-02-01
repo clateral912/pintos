@@ -25,6 +25,7 @@
 #define PGMASK  BITMASK(PGSHIFT, PGBITS)   /* Page offset bits (0:12). */
 
 /* Offset within a page. */
+// 获取一个虚拟地址的offset(32位地址中的低12位)
 static inline unsigned pg_ofs (const void *va) {
   return (uintptr_t) va & PGMASK;
 }
@@ -74,6 +75,9 @@ is_kernel_vaddr (const void *vaddr)
 
 /* Returns kernel virtual address at which physical address PADDR
    is mapped. */
+// 只能在kernel的虚拟内存中使用! 因为kernel虚拟内存是一一映射的
+// 才能使用如此简单的转化, 用户态虚拟内存的转到物理内存的寻址要靠MMU实现
+// 不是一个简单的函数就能实现的
 static inline void *
 ptov (uintptr_t paddr)
 {
@@ -84,6 +88,9 @@ ptov (uintptr_t paddr)
 
 /* Returns physical address at which kernel virtual address VADDR
    is mapped. */
+// 只能在kernel的虚拟内存中使用! 因为kernel虚拟内存是一一映射的
+// 才能使用如此简单的转化, 用户态虚拟内存的转到物理内存的寻址要靠MMU实现
+// 不是一个简单的函数就能实现的
 static inline uintptr_t
 vtop (const void *vaddr)
 {

@@ -115,7 +115,9 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
+      // 这几行代码的执行顺序很重要! 
       cur->pagedir = NULL;
+      // 给pagedir_activate()传入NULL会直接激活init_page_dir, 切换为内核虚拟内存页目录
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
@@ -124,6 +126,7 @@ process_exit (void)
 /* Sets up the CPU for running user code in the current
    thread.
    This function is called on every context switch. */
+// 每次操作系统执行上下文切换都要执行这个代码!
 void
 process_activate (void)
 {

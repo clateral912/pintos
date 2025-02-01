@@ -1,0 +1,2 @@
+CompileFlags:
+  Add: [-I../lib, -I../lib/kernel, -I../lib/user, -xc, -std=c99] 

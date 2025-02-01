@@ -16,8 +16,10 @@
 #include "vaddr.h"
 #include "fixed-point.h"
 #include "../devices/timer.h"
+
+
 #ifdef USERPROG
-#include "userprog/process.h"
+#include "../userprog/process.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -468,6 +470,8 @@ thread_exit (void)
   ASSERT (!intr_context ());
 
 #ifdef USERPROG
+  // 尚未实现!
+  printf("%s: exit(%d)\n", thread_current()->name, 0);
   process_exit ();
 #endif
 

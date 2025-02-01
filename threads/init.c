@@ -162,6 +162,8 @@ bss_init (void)
    kernel virtual mapping, and then sets up the CPU to use the
    new page directory.  Points init_page_dir to the page
    directory it creates. */
+// 初始化PintOS的kernel虚拟内存, 只供内核使用
+// 注意, kernel虚拟内存和物理内存的关系是一一映射的!
 static void
 paging_init (void)
 {
@@ -169,22 +171,33 @@ paging_init (void)
   size_t page;
   extern char _start, _end_kernel_text;
 
+  // 先获取一页， 用作存放页目录Page Directory
   pd = init_page_dir = palloc_get_page (PAL_ASSERT | PAL_ZERO);
   pt = NULL;
+  // 从0开始一页一页地初始化页表与页目录
   for (page = 0; page < init_ram_pages; page++)
     {
+      // paddr的p前缀表示物理地址，从0开始以4KB为步进增长
       uintptr_t paddr = page * PGSIZE;
+      // 将物理地址转化为虚拟地址(kernel虚拟内存)
       char *vaddr = ptov (paddr);
+      //得到虚拟地址对应的页目录序号和页表序号
       size_t pde_idx = pd_no (vaddr);
       size_t pte_idx = pt_no (vaddr);
       bool in_kernel_text = &_start <= vaddr && vaddr < &_end_kernel_text;
 
+      // 由于之前在获取Page Directory页面时设定了PAL_ZERO, 那么, 若页目录对应的entry为0
+      // 则可以断定此entry尚未初始化, 注意, 页目录entry的初始化并不是每个循环都要进行
+      // 一个页目录entry管理4MB内存, 一个页表管理4KB内存, 每次for循环初始化4KB内存
+      // 则需要1024次循环才需要初始化一个页目录entry(pde)
       if (pd[pde_idx] == 0)
         {
+          // 创建新的页表, pt是一个指针
           pt = palloc_get_page (PAL_ASSERT | PAL_ZERO);
+          // 初始化对应的pde
           pd[pde_idx] = pde_create (pt);
         }
-
+      // 创建一个页表entry, 每个循环都要进行一次, 指向刚刚分配的page
       pt[pte_idx] = pte_create_kernel (vaddr, !in_kernel_text);
     }
 
@@ -193,6 +206,7 @@ paging_init (void)
      new page tables immediately.  See [IA32-v2a] "MOV--Move
      to/from Control Registers" and [IA32-v3a] 3.7.5 "Base Address
      of the Page Directory". */
+  // 将页目录的物理地址写入CR3寄存器, 激活新的页目录
   __asm__ volatile ("movl %0, %%cr3" : : "r" (vtop (init_page_dir)));
 }
 
