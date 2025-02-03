@@ -247,6 +247,8 @@ read_command_line (void)
 
 /* Parses options in ARGV[]
    and returns the first non-option argument. */
+// 返回第一个非option的参数
+// -f -q run “example“ ==> run "example"
 static char **
 parse_options (char **argv) 
 {
@@ -354,6 +356,7 @@ run_actions (char **argv)
           break;
 
       /* Check for required arguments. */
+      // 只检查参数的数量是否合法
       for (i = 1; i < a->argc; i++)
         if (argv[i] == NULL)
           PANIC ("action `%s' requires %d argument(s)", *argv, a->argc - 1);

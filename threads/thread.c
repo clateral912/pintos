@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "flags.h"
+#include "init.h"
 #include "interrupt.h"
 #include "intr-stubs.h"
 #include "list.h"
@@ -250,7 +251,7 @@ thread_yield_on_priority (void)
   {
     t = list_entry(e, struct thread, elem);
 
-    if (t->priority > cur->priority)
+    if (t->priority > cur->priority) 
     {
       thread_yield();
       break;

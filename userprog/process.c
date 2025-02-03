@@ -2,25 +2,92 @@
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "gdt.h"
 #include "pagedir.h"
 #include "tss.h"
-#include "../filesys/directory.h"
 #include "../filesys/file.h"
 #include "../filesys/filesys.h"
 #include "../threads/flags.h"
-#include "../threads/init.h"
 #include "../threads/interrupt.h"
 #include "../threads/palloc.h"
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
+#include "../threads/synch.h"
 
+static void* process_push_arguments(uint8_t *esp, char *args);
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (const char *cmdline, void (**eip) (void), void **esp, char *args);
+static struct semaphore process_sema;
 
+// 为当前线程初始化堆栈
+// 根据args, 在栈上压入argc与agrv
+// 专门为main函数压栈
+// main(int argc, char *argv[])
+void*
+process_push_arguments(uint8_t *esp, char* args)
+{
+  char *token, *save_ptr;
+  char *argv[16];         // 存储指向arg中各个token的指针 
+  int argc = 0;
+  int size = 0;
+  
+  // 初始化argv
+  for (int i = 0; i < 16; i++)
+  {
+    argv[i] = NULL;
+  }
+
+  // 获取args中的各个token, 并将其直接按从左到右的顺序压入栈中
+  // 此处的顺序并不重要, 我们只是将参数搬运到用户内存中
+  for (token = strtok_r(args, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+  {
+    esp -= strlen(token) + 1; //别忘记为"\0"分配空间!
+    strlcpy((char *)esp, (const char *)token, strlen(token) + 1);
+    // *esp = *token;
+    argv[argc] = (char *)esp;
+    argc++;
+  }
+
+  // 将栈指针与4对其
+  while((uintptr_t)esp % 4 != 0)
+    esp = (void *)esp - 1;
+  
+  //压入NULL, 标识argv[argc] = NULL
+  esp -= sizeof(uintptr_t);
+  memset((void *)esp, 0, sizeof(char *));
+
+  // 压入argv的各个元素, 它们都是指向token字符串的指针
+  // 按照从右到左的顺序压栈
+  for (int j = 15; j >= 0; j--)
+  {
+    if (argv[j] == NULL)
+      continue;
+
+    esp -= sizeof(char *);
+    *(uintptr_t *)esp = (uintptr_t)argv[j];
+  }
+
+  // 按照从右到左的顺序压入argv与argc
+  // argv[0]就在argv上面4个byte的位置
+  esp -= sizeof(char *);
+  *(uintptr_t *)esp = (uintptr_t)(esp + 4);
+
+  esp -= sizeof(argc);
+  *(uintptr_t *)esp = argc;
+
+  // 压入形式意义上的返回地址: NULL 
+  // 符合调用约定
+  esp -= sizeof(uintptr_t);
+  memset((void *)esp, 0, sizeof(char *));
+
+  hex_dump((uintptr_t) esp, (const void *)esp, (uintptr_t)(PHYS_BASE - (void *)esp), true);
+
+  return (void *)esp;
+}
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -31,9 +98,12 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
+  sema_init(&process_sema, 0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   // 为进程名称分配一页内存, 避免两个线程的竞争(?)
+  // 分配内存后, 我们可以安全地修改字符串了, 不能直接对参数中的file_name做修改!
+  // 因为file_name是const修饰的
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
@@ -43,7 +113,8 @@ process_execute (const char *file_name)
   /* Create a new thread to execute FILE_NAME. */
   // PintOS 只能支持单线程的进程
   // fn_copy将会是start_process()函数的参数
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  // IMPORTANT: 我们将优先级提高到32，避免用户进程与main进程竞争CPU
+  tid = thread_create (file_name, PRI_DEFAULT + 1, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -55,21 +126,26 @@ static void
 start_process (void *file_name_)
 {
   char *file_name = file_name_;
+  char args[64];   // 绝对不可以写成char *args = file_name; !!!
+  char *save_ptr;
   struct intr_frame if_;
   bool success;
 
+  strlcpy(args, file_name, 64);
+  file_name = strtok_r(file_name, " ", &save_ptr);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (file_name, &if_.eip, &if_.esp, args);
 
   /* If load failed, quit. */
   // load()执行完毕, 则把之前分配的内存释放
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -78,6 +154,7 @@ start_process (void *file_name_)
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
   __asm__ volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+  sema_up(&process_sema);
   NOT_REACHED ();
 }
 
@@ -93,6 +170,8 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  sema_down(&process_sema);
+
   return -1;
 }
 
@@ -214,7 +293,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *file_name, void (**eip) (void), void **esp, char *args) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -313,6 +392,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
+  *esp = (void *)process_push_arguments(*esp, args) + 12;
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
