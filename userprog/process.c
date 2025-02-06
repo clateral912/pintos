@@ -31,12 +31,12 @@ void*
 process_push_arguments(uint8_t *esp, char* args)
 {
   char *token, *save_ptr;
-  char *argv[16];         // 存储指向arg中各个token的指针 
+  char *argv[MAX_CMDLINE_TOKENS];         // 存储指向arg中各个token的指针 
   int argc = 0;
   int size = 0;
   
   // 初始化argv
-  for (int i = 0; i < 16; i++)
+  for (int i = 0; i < MAX_CMDLINE_TOKENS; i++)
   {
     argv[i] = NULL;
   }
@@ -62,7 +62,7 @@ process_push_arguments(uint8_t *esp, char* args)
 
   // 压入argv的各个元素, 它们都是指向token字符串的指针
   // 按照从右到左的顺序压栈
-  for (int j = 15; j >= 0; j--)
+  for (int j = MAX_CMDLINE_TOKENS - 1; j >= 0; j--)
   {
     if (argv[j] == NULL)
       continue;
@@ -84,7 +84,9 @@ process_push_arguments(uint8_t *esp, char* args)
   esp -= sizeof(uintptr_t);
   memset((void *)esp, 0, sizeof(char *));
 
-  hex_dump((uintptr_t) esp, (const void *)esp, (uintptr_t)(PHYS_BASE - (void *)esp), true);
+  // 打印esp指向的栈空间, 范围从esp 到 PHYS_BASE
+  // for debug only 
+  //hex_dump((uintptr_t) esp, (const void *)esp, (uintptr_t)(PHYS_BASE - (void *)esp), true);
 
   return (void *)esp;
 }
@@ -113,8 +115,7 @@ process_execute (const char *file_name)
   /* Create a new thread to execute FILE_NAME. */
   // PintOS 只能支持单线程的进程
   // fn_copy将会是start_process()函数的参数
-  // IMPORTANT: 我们将优先级提高到32，避免用户进程与main进程竞争CPU
-  tid = thread_create (file_name, PRI_DEFAULT + 1, start_process, fn_copy);
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -126,13 +127,15 @@ static void
 start_process (void *file_name_)
 {
   char *file_name = file_name_;
-  char args[64];   // 绝对不可以写成char *args = file_name; !!!
+  char args[MAX_CMDLINE_LENGTH];    // 绝对不可以写成char *args = file_name; !!!
+                                    // 128是经过尝试的magic number
   char *save_ptr;
   struct intr_frame if_;
   bool success;
 
-  strlcpy(args, file_name, 64);
+  strlcpy(args, file_name, MAX_CMDLINE_LENGTH);
   file_name = strtok_r(file_name, " ", &save_ptr);
+  strlcpy(thread_current()->name, (const char *)file_name, 16);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -176,6 +179,7 @@ process_wait (tid_t child_tid UNUSED)
 }
 
 /* Free the current process's resources. */
+// IMPORTANT: 此处未实现线程的销毁! 需要额外调用一次thread_exit()!!!
 void
 process_exit (void)
 {
@@ -200,6 +204,7 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  sema_up(&process_sema);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -392,7 +397,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char *args)
   if (!setup_stack (esp))
     goto done;
 
-  *esp = (void *)process_push_arguments(*esp, args) + 12;
+  *esp = (void *)process_push_arguments(*esp, args);
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
