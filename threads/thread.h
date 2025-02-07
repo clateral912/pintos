@@ -31,8 +31,9 @@ typedef int tid_t;
 
 struct pwait_node_ 
 {
-  tid_t parent_pid;
-  uint32_t status;
+  struct thread *parent;
+  struct thread *child;
+  int32_t status;
   bool exited;
   struct semaphore sema;
   struct list_elem elem;
@@ -114,6 +115,7 @@ struct thread
     struct pwait_node_ *pwait_node; 
     struct list pwait_list;
     struct lock pwait_list_lock;
+    struct semaphore exec_sema;
 //#endif
     struct lock* lock_waiting;
     struct lock* lock_holding[MAX_LOCKS]; 

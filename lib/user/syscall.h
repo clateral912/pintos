@@ -2,7 +2,9 @@
 #define __LIB_USER_SYSCALL_H
 
 #include <stdbool.h>
-#include <debug.h>
+#include "../debug.h"
+//上面这个include做过修改!
+//原先为<debug.h>
 
 /* Process identifier. */
 typedef int pid_t;

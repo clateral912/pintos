@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gdt.h"
+#include "list.h"
 #include "pagedir.h"
 #include "tss.h"
 #include "../filesys/file.h"
@@ -21,7 +22,6 @@
 static void* process_push_arguments(uint8_t *esp, char *args);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp, char *args);
-static struct semaphore process_sema;
 
 // 为当前线程初始化堆栈
 // 根据args, 在栈上压入argc与agrv
@@ -100,7 +100,6 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  sema_init(&process_sema, 0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   // 为进程名称分配一页内存, 避免两个线程的竞争(?)
@@ -149,7 +148,7 @@ start_process (void *file_name_)
   if (!success) 
     thread_exit ();
 
-
+  sema_up(&thread_current()->pwait_node->parent->exec_sema);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -157,7 +156,6 @@ start_process (void *file_name_)
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
   __asm__ volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-  sema_up(&process_sema);
   NOT_REACHED ();
 }
 
@@ -173,11 +171,30 @@ start_process (void *file_name_)
 // 注意! 每个进程的TID都是不同的! 不会用TID复用的情况!
 //
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  sema_down(&process_sema);
+  struct thread *cur = thread_current();
+  struct list_elem *e;
+  struct pwait_node_ *node;
+  struct semaphore *pwait_sema = NULL;
 
-  return -1;
+  for (e = list_begin(&cur->pwait_list); e != list_end(&cur->pwait_list); e = list_next(e))
+  {
+    node = list_entry(e, struct pwait_node_, elem);
+    
+    if (node->child->tid == child_tid)
+    {
+      pwait_sema = &node->sema;
+      break;
+    }
+  }
+  
+  if (pwait_sema == NULL)
+    return -1;
+
+  sema_down(pwait_sema);
+
+  return node->status;
 }
 
 /* Free the current process's resources. */
@@ -206,7 +223,6 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  sema_up(&process_sema);
 }
 
 /* Sets up the CPU for running user code in the current

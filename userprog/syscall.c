@@ -1,4 +1,5 @@
 #include "syscall.h"
+#include <string.h>
 #include "../devices/shutdown.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -9,7 +10,7 @@
 #include "stdio.h"
 
 static void syscall_handler (struct intr_frame *);
-static void retval(struct intr_frame *f, uint32_t);
+static void retval(struct intr_frame *f, int32_t);
 
 // arg0 位于栈中的低地址
 struct syscall_frame_3args{
@@ -27,7 +28,7 @@ struct syscall_frame_2args{
 
 static inline
 void
-retval(struct intr_frame *f, uint32_t num)
+retval(struct intr_frame *f, int32_t num)
 {
   f->eax = num;  
 }
@@ -41,11 +42,57 @@ syscall_get_intr_frame(void *esp)
 }
 
 static void
+syscall_exec(struct intr_frame *f)
+{
+  const char *file = (char *)(*((uint32_t *)(f->esp) + 1));
+  int pid;
+  
+  pid = process_execute(file);
+  
+  sema_down(&thread_current()->exec_sema);
+
+  // load fail也应该返回-1 此处未处理这种情况!
+  if (pid == TID_ERROR)
+    retval(f, -1);
+  else
+    retval(f, pid);
+
+}
+
+static void
+syscall_wait(struct intr_frame *f)
+{
+  int pid = *((uint32_t *)(f->esp) + 1);
+  int child_status;
+
+  child_status = process_wait(pid);
+
+  retval(f, child_status);
+}
+
+static void
 syscall_exit(struct intr_frame *f)
 {
-  unsigned int status = *(uint32_t *)(f->esp + 1); 
-  process_exit();
+  int status = *((int32_t *)(f->esp) + 1); 
+  struct semaphore *sema = NULL;
+
+  struct thread *cur = thread_current();
+  if (cur->pwait_node != NULL)
+  {
+    cur->pwait_node->status = status;
+    cur->pwait_node->exited = true;
+    //将sema指针暂时存起来, 当thread_exit后, cur指针将不再可用
+    sema = &cur->pwait_node->sema;
+  }
+ 
+  // 打印Process Termination Messages
+  printf("%s: exit(%d)\n", cur->name, status);
+
+  if (sema != NULL)
+    sema_up(sema);
   retval(f, status);
+
+  //IMPORTANT: 线程所有要做的事情都要在thread_exit()前做完!
   thread_exit();
 }
 
@@ -88,6 +135,9 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_EXIT:
       syscall_exit(f); 
+      break;
+    case SYS_EXEC:
+      syscall_exec(f);
       break;
   }
 }

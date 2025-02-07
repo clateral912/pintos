@@ -117,6 +117,7 @@ thread_init (void)
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
   lock_init(&initial_thread->pwait_list_lock);
+  sema_init(&initial_thread->exec_sema, 0);
   list_init(&initial_thread->pwait_list);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
@@ -335,6 +336,24 @@ thread_print_stats (void)
           idle_ticks, kernel_ticks, user_ticks);
 }
 
+// 释放等待队列的各个node的内存
+// 不对pwait_list本身做remove等操作, 只是释放内存
+void
+thread_destroy_pwait_list(struct thread *t)
+{
+  struct list_elem *e;
+  struct pwait_node_ *node;
+
+  for (e = list_begin(&t->pwait_list); e != list_end(&t->pwait_list); e = list_next(e))
+  {
+    node = list_entry(e, struct pwait_node_, elem);
+
+    node->child->pwait_node = NULL;
+    free(node);
+  }
+
+}
+
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier
@@ -389,6 +408,9 @@ thread_create (const char *name, int priority,
   sf->ebp = 0;
 
   // Project 2: USERPROG
+
+  sema_init(&t->exec_sema, 0);
+
   // 初始化wait()有关事宜
   list_init(&t->pwait_list);
   lock_init(&t->pwait_list_lock);
@@ -399,9 +421,10 @@ thread_create (const char *name, int priority,
     PANIC("pwait_node memory allocation failed!\n");
 
   sema_init(&t->pwait_node->sema, 0);
-  t->pwait_node->exited = false;
-  t->pwait_node->parent_pid = cur->tid;
-  t->pwait_node->status = NOT_SPECIFIED;
+  t->pwait_node->child      =   t;
+  t->pwait_node->exited     =   false;
+  t->pwait_node->parent     =   cur;
+  t->pwait_node->status     =   NOT_SPECIFIED;
 
   lock_acquire(&cur->pwait_list_lock);
   list_push_back(&(cur->pwait_list), &(t->pwait_node->elem));
@@ -493,9 +516,7 @@ thread_exit (void)
 {
   ASSERT (!intr_context ());
 
-#ifdef USERPROG
-  // 尚未实现!
-  printf("%s: exit(%d)\n", thread_current()->name, 0);
+#ifdef USERPROG 
   process_exit ();
 #endif
 
@@ -504,6 +525,7 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
   intr_disable ();
   struct thread *t = thread_current();
+  thread_destroy_pwait_list(t);
   list_remove (&t->allelem);
   t->status = THREAD_DYING;
   schedule ();

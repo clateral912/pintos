@@ -1,9 +1,9 @@
-#include "userprog/exception.h"
+#include "exception.h"
 #include <inttypes.h>
 #include <stdio.h>
-#include "userprog/gdt.h"
-#include "threads/interrupt.h"
-#include "threads/thread.h"
+#include "gdt.h"
+#include "../threads/interrupt.h"
+#include "../threads/thread.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -89,8 +89,21 @@ kill (struct intr_frame *f)
       printf ("%s: dying due to interrupt %#04x (%s).\n",
               thread_name (), f->vec_no, intr_name (f->vec_no));
       intr_dump_frame (f);
+
+      struct semaphore *sema = NULL;
+      struct thread *cur = thread_current();
+      if (cur->pwait_node != NULL)
+      {
+        cur->pwait_node->status = -1;
+        cur->pwait_node->exited = true;
+        //将sema指针暂时存起来, 当thread_exit后, cur指针将不再可用
+        sema = &cur->pwait_node->sema;
+      }
+     
       thread_exit (); 
 
+      if (sema != NULL)
+        sema_up(sema);
     case SEL_KCSEG:
       /* Kernel's code segment, which indicates a kernel bug.
          Kernel code shouldn't throw exceptions.  (Page faults
@@ -134,7 +147,7 @@ page_fault (struct intr_frame *f)
      See [IA32-v2a] "MOV--Move to/from Control Registers" and
      [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
      (#PF)". */
-  asm ("movl %%cr2, %0" : "=r" (fault_addr));
+  __asm__ ("movl %%cr2, %0" : "=r" (fault_addr));
 
   /* Turn interrupts back on (they were only off so that we could
      be assured of reading CR2 before it changed). */
