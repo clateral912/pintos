@@ -10,6 +10,7 @@
 #include "interrupt.h"
 #include "intr-stubs.h"
 #include "list.h"
+#include "malloc.h"
 #include "palloc.h"
 #include "stdbool.h"
 #include "switch.h"
@@ -115,6 +116,8 @@ thread_init (void)
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
+  lock_init(&initial_thread->pwait_list_lock);
+  list_init(&initial_thread->pwait_list);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
 }
@@ -387,23 +390,21 @@ thread_create (const char *name, int priority,
 
   // Project 2: USERPROG
   // 初始化wait()有关事宜
-  if (cur->pwait_list.head.next == NULL)
-  {
-    lock_init(&cur->pwait_list_lock);
-    list_init(&cur->pwait_list);
-  }
-
   list_init(&t->pwait_list);
   lock_init(&t->pwait_list_lock);
 
   //初始化自己的node
-  sema_init(&t->pwait_node.sema, 0);
-  t->pwait_node.exited = false;
-  t->pwait_node.parent_pid = cur->tid;
-  t->pwait_node.status = NOT_SPECIFIED;
+  t->pwait_node = malloc(sizeof(struct pwait_node_));
+  if (t->pwait_node == NULL)
+    PANIC("pwait_node memory allocation failed!\n");
+
+  sema_init(&t->pwait_node->sema, 0);
+  t->pwait_node->exited = false;
+  t->pwait_node->parent_pid = cur->tid;
+  t->pwait_node->status = NOT_SPECIFIED;
 
   lock_acquire(&cur->pwait_list_lock);
-  list_push_back(&(cur->pwait_list), &(t->pwait_node.elem));
+  list_push_back(&(cur->pwait_list), &(t->pwait_node->elem));
   lock_release(&cur->pwait_list_lock);
 
   /* Add to run queue. */

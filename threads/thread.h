@@ -111,7 +111,7 @@ struct thread
 //#ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
-    struct pwait_node_ pwait_node; 
+    struct pwait_node_ *pwait_node; 
     struct list pwait_list;
     struct lock pwait_list_lock;
 //#endif
