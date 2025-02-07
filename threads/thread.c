@@ -352,6 +352,7 @@ thread_create (const char *name, int priority,
                thread_func *function, void *aux) 
 {
   struct thread *t;
+  struct thread *cur = thread_current();
   struct kernel_thread_frame *kf;
   struct switch_entry_frame *ef;
   struct switch_threads_frame *sf;
@@ -383,6 +384,27 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+
+  // Project 2: USERPROG
+  // 初始化wait()有关事宜
+  if (cur->pwait_list.head.next == NULL)
+  {
+    lock_init(&cur->pwait_list_lock);
+    list_init(&cur->pwait_list);
+  }
+
+  list_init(&t->pwait_list);
+  lock_init(&t->pwait_list_lock);
+
+  //初始化自己的node
+  sema_init(&t->pwait_node.sema, 0);
+  t->pwait_node.exited = false;
+  t->pwait_node.parent_pid = cur->tid;
+  t->pwait_node.status = NOT_SPECIFIED;
+
+  lock_acquire(&cur->pwait_list_lock);
+  list_push_back(&(cur->pwait_list), &(t->pwait_node.elem));
+  lock_release(&cur->pwait_list_lock);
 
   /* Add to run queue. */
   thread_unblock (t);

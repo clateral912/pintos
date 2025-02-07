@@ -168,8 +168,10 @@ start_process (void *file_name_)
    been successfully called for the given TID, returns -1
    immediately, without waiting.
 
-   This function will be implemented in problem 2-2.  For now, it
+    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
+// 注意! 每个进程的TID都是不同的! 不会用TID复用的情况!
+//
 int
 process_wait (tid_t child_tid UNUSED) 
 {

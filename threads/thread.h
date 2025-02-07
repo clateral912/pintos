@@ -5,6 +5,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -26,6 +27,17 @@ typedef int tid_t;
 #define PRI_MAX 63                      /* Highest priority. */
 
 #define MAX_LOCKS 10
+#define NOT_SPECIFIED -2
+
+struct pwait_node_ 
+{
+  tid_t parent_pid;
+  uint32_t status;
+  bool exited;
+  struct semaphore sema;
+  struct list_elem elem;
+};
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -99,6 +111,9 @@ struct thread
 //#ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct pwait_node_ pwait_node; 
+    struct list pwait_list;
+    struct lock pwait_list_lock;
 //#endif
     struct lock* lock_waiting;
     struct lock* lock_holding[MAX_LOCKS]; 
