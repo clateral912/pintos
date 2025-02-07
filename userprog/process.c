@@ -182,7 +182,12 @@ process_wait (tid_t child_tid)
   {
     node = list_entry(e, struct pwait_node_, elem);
     
-    if (node->child->tid == child_tid)
+    //注意! 这里不能写node->child->tid, 因为此时我们在用户进程内存空间中
+    //虽然node->child的地址没变, 但这个虚拟地址在不同页表和页目录下指向了完全不同的地方!
+    //因此我们只能额外用一个变量child_pid来存储pid 
+    //但是在内核上下文中, 我们可用使用node->child来访问线程句柄
+    //比如thread_destroy_pwait_list();
+    if (node->child_pid == child_tid)
     {
       pwait_sema = &node->sema;
       break;

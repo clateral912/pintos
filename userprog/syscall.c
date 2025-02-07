@@ -139,5 +139,8 @@ syscall_handler (struct intr_frame *f)
     case SYS_EXEC:
       syscall_exec(f);
       break;
+    case SYS_WAIT:
+      syscall_wait(f);
+      break;
   }
 }

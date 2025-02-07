@@ -33,6 +33,7 @@ struct pwait_node_
 {
   struct thread *parent;
   struct thread *child;
+  uint32_t child_pid;
   int32_t status;
   bool exited;
   struct semaphore sema;
