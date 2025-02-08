@@ -82,6 +82,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
+static void thread_destroy_pwait_list(struct thread *);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 void thread_iterate_ready_list(void);
@@ -116,7 +117,6 @@ thread_init (void)
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
-  lock_init(&initial_thread->pwait_list_lock);
   sema_init(&initial_thread->exec_sema, 0);
   list_init(&initial_thread->pwait_list);
   initial_thread->status = THREAD_RUNNING;
@@ -338,20 +338,21 @@ thread_print_stats (void)
 
 // 释放等待队列的各个node的内存
 // 不对pwait_list本身做remove等操作, 只是释放内存
-void
+static void
 thread_destroy_pwait_list(struct thread *t)
 {
   struct list_elem *e;
   struct pwait_node_ *node;
 
-  for (e = list_begin(&t->pwait_list); e != list_end(&t->pwait_list); e = list_next(e))
+  for (e = list_begin(&t->pwait_list); e != list_end(&t->pwait_list); )
   {
     node = list_entry(e, struct pwait_node_, elem);
 
     node->child->pwait_node = NULL;
+    // 必须在free前获取下一个节点! 否则e自己会被释放!
+    e = list_next(e);
     free(node);
   }
-
 }
 
 /* Creates a new kernel thread named NAME with the given initial
@@ -413,7 +414,6 @@ thread_create (const char *name, int priority,
 
   // 初始化wait()有关事宜
   list_init(&t->pwait_list);
-  lock_init(&t->pwait_list_lock);
 
   //初始化自己的node
   t->pwait_node = malloc(sizeof(struct pwait_node_));
@@ -427,9 +427,7 @@ thread_create (const char *name, int priority,
   t->pwait_node->parent     =   cur;
   t->pwait_node->status     =   NOT_SPECIFIED;
 
-  lock_acquire(&cur->pwait_list_lock);
   list_push_back(&(cur->pwait_list), &(t->pwait_node->elem));
-  lock_release(&cur->pwait_list_lock);
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -516,7 +514,9 @@ void
 thread_exit (void) 
 {
   ASSERT (!intr_context ());
-
+  struct thread *t = thread_current();
+  // 顺序很重要! 要在process_exit()之前清理pwait_list, 而不是之后!
+  thread_destroy_pwait_list(t);
 #ifdef USERPROG 
   process_exit ();
 #endif
@@ -525,8 +525,6 @@ thread_exit (void)
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
   intr_disable ();
-  struct thread *t = thread_current();
-  thread_destroy_pwait_list(t);
   list_remove (&t->allelem);
   t->status = THREAD_DYING;
   schedule ();

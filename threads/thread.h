@@ -115,7 +115,6 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct pwait_node_ *pwait_node; 
     struct list pwait_list;
-    struct lock pwait_list_lock;
     struct semaphore exec_sema;
 //#endif
     struct lock* lock_waiting;
