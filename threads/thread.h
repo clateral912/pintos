@@ -35,7 +35,7 @@ struct pwait_node_
   struct thread *child;
   uint32_t child_pid;
   int32_t status;
-  bool exited;
+  bool waited;
   struct semaphore sema;
   struct list_elem elem;
 };

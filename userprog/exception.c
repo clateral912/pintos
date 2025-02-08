@@ -4,6 +4,7 @@
 #include "gdt.h"
 #include "../threads/interrupt.h"
 #include "../threads/thread.h"
+#include "../threads/vaddr.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -95,15 +96,14 @@ kill (struct intr_frame *f)
       if (cur->pwait_node != NULL)
       {
         cur->pwait_node->status = -1;
-        cur->pwait_node->exited = true;
-        //将sema指针暂时存起来, 当thread_exit后, cur指针将不再可用
         sema = &cur->pwait_node->sema;
       }
      
-      thread_exit (); 
-
       if (sema != NULL)
         sema_up(sema);
+
+      thread_exit (); 
+
     case SEL_KCSEG:
       /* Kernel's code segment, which indicates a kernel bug.
          Kernel code shouldn't throw exceptions.  (Page faults
@@ -138,6 +138,7 @@ page_fault (struct intr_frame *f)
   bool not_present;  /* True: not-present page, false: writing r/o page. */
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
+  bool from_user_vm; /* 造成Page Fault的地址来自用户内存空间 */
   void *fault_addr;  /* Fault address. */
 
   /* Obtain faulting address, the virtual address that was
@@ -153,13 +154,28 @@ page_fault (struct intr_frame *f)
      be assured of reading CR2 before it changed). */
   intr_enable ();
 
-  /* Count page faults. */
-  page_fault_cnt++;
 
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+
+  from_user_vm = is_user_vaddr(fault_addr);
+  // 仅仅通过kernel出现Page Fault加上错误地址来自用户内存空间, 就可以判断
+  // Page Fault一定来自syscall部分吗? 这对吗?
+  // TODO: 明确判断系统调用产生的Page Fault的逻辑
+  if (from_user_vm && !user)
+  {
+    //然后我们就可以断定, 这个页面错误来自系统调用
+    //以下对esp, eip的操作仅供get_user()和put_user()使用
+    f->eip = (void (*) (void)) f->eax;
+    f->eax = -1;
+    return;
+  }
+
+
+  /* Count page faults. */
+  page_fault_cnt++;
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

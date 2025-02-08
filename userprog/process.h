@@ -5,6 +5,9 @@
 
 #define MAX_CMDLINE_LENGTH 128
 #define MAX_CMDLINE_TOKENS 32
+#define FORCE_EXIT 1 
+
+extern bool load_failed;
 
 tid_t process_execute (const char *file_name);
 int process_wait (tid_t);

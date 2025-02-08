@@ -23,6 +23,8 @@ static void* process_push_arguments(uint8_t *esp, char *args);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp, char *args);
 
+bool load_failed;
+
 // 为当前线程初始化堆栈
 // 根据args, 在栈上压入argc与agrv
 // 专门为main函数压栈
@@ -135,6 +137,8 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  load_failed = false;
+
   strlcpy(args, file_name, MAX_CMDLINE_LENGTH);
   file_name = strtok_r(file_name, " ", &save_ptr);
   strlcpy(thread_current()->name, (const char *)file_name, 16);
@@ -148,10 +152,13 @@ start_process (void *file_name_)
   /* If load failed, quit. */
   // load()执行完毕, 则把之前分配的内存释放
   palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
-
+  load_failed = !success;
   sema_up(&thread_current()->pwait_node->parent->exec_sema);
+  if (load_failed)
+  {
+    thread_exit();
+  }
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -197,10 +204,13 @@ process_wait (tid_t child_tid)
     }
   }
   
-  if (pwait_sema == NULL)
+  // 若未找到pid子进程或进程已经退出, 那么返回-1
+  if (pwait_sema == NULL || node->waited)
     return -1;
 
+  //执行等待
   sema_down(pwait_sema);
+  node->waited = true;
 
   return node->status;
 }

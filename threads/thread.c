@@ -423,7 +423,7 @@ thread_create (const char *name, int priority,
   sema_init(&t->pwait_node->sema, 0);
   t->pwait_node->child      =   t;
   t->pwait_node->child_pid  =   t->tid;
-  t->pwait_node->exited     =   false;
+  t->pwait_node->waited     =   false;
   t->pwait_node->parent     =   cur;
   t->pwait_node->status     =   NOT_SPECIFIED;
 
