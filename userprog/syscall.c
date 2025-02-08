@@ -8,6 +8,7 @@
 #include "../threads/interrupt.h"
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
+#include "../filesys/filesys.h"
 #include "process.h"
 #include "stdbool.h"
 #include "stdio.h"
@@ -120,6 +121,41 @@ syscall_get_intr_frame(void *esp)
 {
   struct intr_frame *f = (struct intr_frame *)((char *)&(esp) - offsetof(struct intr_frame, esp));
   return f;
+}
+
+static void
+syscall_create(struct intr_frame *f)
+{
+  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_2args))); 
+    syscall_exit(f, FORCE_EXIT);
+  
+  struct syscall_frame_2args* args = (struct syscall_frame_2args *)((uint32_t *)(f->esp) + 1);
+  
+  const char *file = (char *)args->arg0;
+  uint32_t initial_size = args->arg1;
+
+  if(!str_valid(file))
+    syscall_exit(f, FORCE_EXIT);
+
+  bool success = filesys_create(file, initial_size);
+  
+  retval(f, success);
+}
+
+static void
+syscall_remove(struct intr_frame *f)
+{
+  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_2args))); 
+    syscall_exit(f, FORCE_EXIT);
+
+  const char *file = (char *)(*((uint32_t *)(f->esp) + 1));
+
+   // 检查file指向的字符串的合法性
+  if (!str_valid(file))
+    syscall_exit(f, FORCE_EXIT);
+
+  bool success = filesys_remove(file);
+  retval(f, success);
 }
 
 static void
@@ -256,6 +292,12 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_WAIT:
       syscall_wait(f);
+      break;
+    case SYS_CREATE:
+      syscall_create(f);
+      break;
+    case SYS_REMOVE:
+      syscall_remove(f);
       break;
   }
 }
