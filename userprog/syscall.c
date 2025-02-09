@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "../devices/shutdown.h"
+#include "../devices/input.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <syscall-nr.h>
@@ -184,6 +185,24 @@ syscall_remove(struct intr_frame *f)
 }
 
 static void
+syscall_filesize(struct intr_frame *f)
+{
+  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(uint32_t)))
+    syscall_exit(f, FORCE_EXIT);
+
+  uint32_t fd = *((uint32_t *)(f->esp) + 1);
+
+  struct file *file = process_from_fd_get_file(thread_current(), fd);
+  if (file == NULL)
+  {
+    retval(f, -1);
+    return ;
+  }
+  size_t size = file_length(file);
+  retval(f, size);
+}
+
+static void
 syscall_open(struct intr_frame *f)
 {
   uint32_t fd;
@@ -217,6 +236,38 @@ syscall_close(struct intr_frame *f)
 
   file_close(file); 
   process_remove_fd_node(thread_current(), fd);
+}
+
+static void
+syscall_read(struct intr_frame *f)
+{
+  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_3args)))
+    syscall_exit(f, FORCE_EXIT);
+  
+  struct syscall_frame_3args *args = (struct syscall_frame_3args *)((uint32_t *)(f->esp) + 1);
+
+  uint32_t fd = args->arg0;
+  void *buffer = (void *)args->arg1;
+  size_t size = args->arg2;
+
+  if(!mem_valid(buffer, size))
+    syscall_exit(f, FORCE_EXIT);
+  
+  if (fd == 0)
+  {
+    // 手册说的不清楚! 当fd为0时返回什么?
+    uint8_t key = input_getc();
+    retval(f, key);
+    return ;
+  }
+  struct file *file = process_from_fd_get_file(thread_current(), fd);
+  if (file == NULL)
+  {
+    retval(f, -1);
+    return ;
+  }
+  size_t bytes = file_read(file, buffer, size);
+  retval(f, bytes);
 }
 
 static void
@@ -306,12 +357,23 @@ syscall_write(struct intr_frame *f)
   void *buffer = (void *)args->arg1;
   size_t size = args->arg2;
 
+  if(!mem_valid(buffer, size))
+    syscall_exit(f, FORCE_EXIT);
+
   // 仅对printf做初步的支持
   if (fd == 1)
+  {
     putbuf((const char *)buffer, size);
+    return ;
+  }
 
-  // !!!并没有实现返回写入多少字符的功能!!!
-  retval(f, size);
+  struct file *file = process_from_fd_get_file(thread_current(), fd);
+  if (file == NULL)
+    return ;
+
+  size_t bytes = file_write(file, buffer, size);
+
+  retval(f, bytes);
 }
 
 void
@@ -332,6 +394,12 @@ syscall_handler (struct intr_frame *f)
 
   switch(syscall_no)
   {
+    case SYS_FILESIZE:
+      syscall_filesize(f);
+      break;
+    case SYS_READ:
+      syscall_read(f);
+      break;
     case SYS_WRITE:
       syscall_write(f);
       break;
