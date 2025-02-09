@@ -119,6 +119,8 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   sema_init(&initial_thread->exec_sema, 0);
   list_init(&initial_thread->pwait_list);
+  list_init(&initial_thread->fd_list);
+  initial_thread->current_fd = 1;
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
 }
@@ -411,7 +413,8 @@ thread_create (const char *name, int priority,
   // Project 2: USERPROG
 
   sema_init(&t->exec_sema, 0);
-
+  list_init(&t->fd_list);
+  t->current_fd = 1;
   // 初始化wait()有关事宜
   list_init(&t->pwait_list);
 

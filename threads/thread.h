@@ -6,6 +6,8 @@
 #include <list.h>
 #include <stdint.h>
 #include "synch.h"
+#include "../filesys/filesys.h"
+#include "../filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -40,6 +42,12 @@ struct pwait_node_
   struct list_elem elem;
 };
 
+struct fd_node
+{
+  uint32_t fd;
+  struct file *file;
+  struct list_elem elem;
+};
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -117,6 +125,8 @@ struct thread
     struct list pwait_list;
     struct semaphore exec_sema;
 //#endif
+    struct list fd_list;
+    uint32_t current_fd;
     struct lock* lock_waiting;
     struct lock* lock_holding[MAX_LOCKS]; 
     int lock_cnt;

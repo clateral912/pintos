@@ -13,6 +13,8 @@
 #include "stdbool.h"
 #include "stdio.h"
 
+#define NO_LIMIT 32768    //32768是随便想出来的一个maigic number
+
 static void syscall_handler (struct intr_frame *);
 static void retval(struct intr_frame *f, int32_t);
 static void syscall_exit(struct intr_frame *, int32_t);
@@ -56,11 +58,14 @@ put_user (uint8_t *udst, uint8_t byte)
 
 // 检查一个字符串是否有效(全部都在可访问的内存空间中)
 static bool
-str_valid(const char *string)
+str_valid(const char *string, uint32_t len_limit)
 {
   const char *p;
   char c;
-  ASSERT (string != NULL);
+  uint32_t length = 0;
+  
+  if (string == NULL)
+    return false;
 
   if (!is_user_vaddr(string))
     return false;
@@ -72,6 +77,9 @@ str_valid(const char *string)
         return false;
     if (c == '\0')
         break;
+
+    if(++length > len_limit)
+      return false;
   }
   return true;
 }
@@ -80,8 +88,9 @@ str_valid(const char *string)
 static bool
 byte_valid(void *ptr)
 {
-  ASSERT(ptr != NULL);
- 
+  if (ptr == NULL)
+    return false;
+  
   if (!is_user_vaddr(ptr))
     return false;
 
@@ -92,8 +101,9 @@ byte_valid(void *ptr)
 static bool
 mem_valid(void *ptr_, size_t size)
 {
-  ASSERT(ptr_ != NULL)
-  
+  if (ptr_ == NULL)
+    return false;
+
   if (!is_user_vaddr(ptr_))
     return false;
 
@@ -108,12 +118,35 @@ mem_valid(void *ptr_, size_t size)
   return true;
 }
 
+// 仅对第一个参数为const char *的系统调用有效
+// 对其他类型的系统调用进行检查是未定义行为!
+static const char *
+check_charptr_validity(struct intr_frame *f)
+{
+  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(uint32_t)))
+  {
+    syscall_exit(f, FORCE_EXIT);
+    return NULL;
+  }
+  
+  const char *file = (char *)(*((uint32_t *)(f->esp) + 1));
+  
+  // 检查file指向的字符串的合法性
+  if (!str_valid(file, 255))
+  {
+    syscall_exit(f, FORCE_EXIT);
+    return NULL;
+  }
+  return file;
+}
+
 static inline
 void
 retval(struct intr_frame *f, int32_t num)
 {
   f->eax = num;  
 }
+
 
 static inline 
 struct intr_frame *
@@ -126,7 +159,7 @@ syscall_get_intr_frame(void *esp)
 static void
 syscall_create(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_2args))); 
+  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_2args)))
     syscall_exit(f, FORCE_EXIT);
   
   struct syscall_frame_2args* args = (struct syscall_frame_2args *)((uint32_t *)(f->esp) + 1);
@@ -134,7 +167,7 @@ syscall_create(struct intr_frame *f)
   const char *file = (char *)args->arg0;
   uint32_t initial_size = args->arg1;
 
-  if(!str_valid(file))
+  if(!str_valid(file, NO_LIMIT))
     syscall_exit(f, FORCE_EXIT);
 
   bool success = filesys_create(file, initial_size);
@@ -145,30 +178,51 @@ syscall_create(struct intr_frame *f)
 static void
 syscall_remove(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_2args))); 
-    syscall_exit(f, FORCE_EXIT);
-
-  const char *file = (char *)(*((uint32_t *)(f->esp) + 1));
-
-   // 检查file指向的字符串的合法性
-  if (!str_valid(file))
-    syscall_exit(f, FORCE_EXIT);
-
+  const char *file = check_charptr_validity(f);
   bool success = filesys_remove(file);
   retval(f, success);
 }
 
 static void
-syscall_exec(struct intr_frame *f)
+syscall_open(struct intr_frame *f)
+{
+  uint32_t fd;
+  const char *file_name = check_charptr_validity(f);
+  struct file *file = filesys_open(file_name);
+  // file==NULL的情况有内部内存分配错误, 以及未找到文件
+  // 未找到文件的情况在此处处理
+  // TODO: 逻辑漏洞! 如果是内部内存错误怎么办?
+  // 从测试点的逻辑倒推, 打开文件失败应该正常退出才对
+  // 而不是把进程杀死
+  if (file == NULL)
+  {
+    retval(f, -1);
+    return ;
+  }
+  fd = process_create_fd_node(thread_current(), file);
+  retval(f, fd);
+}
+
+static void
+syscall_close(struct intr_frame *f)
 {
   if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(uint32_t)))
     syscall_exit(f, FORCE_EXIT);
+
+  int fd = *((uint32_t *)(f->esp) + 1);
+  struct file *file = process_from_fd_get_file(thread_current(), fd);
   
-  const char *file = (char *)(*((uint32_t *)(f->esp) + 1));
-  
-  // 检查file指向的字符串的合法性
-  if (!str_valid(file))
-    syscall_exit(f, FORCE_EXIT);
+  if (file == NULL)
+    return ;
+
+  file_close(file); 
+  process_remove_fd_node(thread_current(), fd);
+}
+
+static void
+syscall_exec(struct intr_frame *f)
+{
+  const char *file = check_charptr_validity(f);
 
   int pid;
   
@@ -299,5 +353,14 @@ syscall_handler (struct intr_frame *f)
     case SYS_REMOVE:
       syscall_remove(f);
       break;
+    case SYS_OPEN:
+      syscall_open(f);
+      break;
+    case SYS_CLOSE:
+      syscall_close(f);
+      break;
+    default:
+      printf("Unknown syscall number! Killing process...\n");
+      syscall_exit(f, FORCE_EXIT);
   }
 }

@@ -2,8 +2,8 @@
 #define FILESYS_INODE_H
 
 #include <stdbool.h>
-#include "filesys/off_t.h"
-#include "devices/block.h"
+#include "off_t.h"
+#include "../devices/block.h"
 
 struct bitmap;
 

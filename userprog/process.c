@@ -15,6 +15,7 @@
 #include "../threads/flags.h"
 #include "../threads/interrupt.h"
 #include "../threads/palloc.h"
+#include "../threads/malloc.h"
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
 #include "../threads/synch.h"
@@ -93,6 +94,74 @@ process_push_arguments(uint8_t *esp, char* args)
   return (void *)esp;
 }
 
+static uint32_t inline
+process_allocate_fd(struct thread *t)
+{
+  return (++t->current_fd);
+}
+
+void
+process_destroy_fd_list(struct thread *t)
+{
+  struct list_elem *e;
+  struct fd_node *node;
+
+  for (e = list_begin(&t->fd_list); e != list_end(&t->fd_list); )
+  {
+    node = list_entry(e, struct fd_node, elem);
+    file_close(node->file);
+    e = list_next(e);
+    free(node);
+  }
+}
+
+uint32_t
+process_create_fd_node(struct thread *t, struct file *file)
+{
+  struct fd_node *node;
+  node = malloc(sizeof(struct fd_node));
+  if (node == NULL)
+    PANIC("fd node memory allocation failed!\n");
+
+  node->fd = process_allocate_fd(t);
+  node->file = file;
+
+  list_push_back(&t->fd_list, &node->elem);
+  return node->fd;
+}
+
+bool
+process_remove_fd_node(struct thread *t, uint32_t fd)
+{
+  struct list_elem *e;
+  struct fd_node *node;
+  for (e = list_begin(&t->fd_list); e != list_end(&t->fd_list); )
+  {
+    node = list_entry(e, struct fd_node, elem);
+    if (node->fd == fd)
+    {
+      node->file = NULL;
+      list_remove(e);
+      free(node);
+      return true;
+    }
+  }
+  return false;
+}
+
+struct file *
+process_from_fd_get_file(struct thread *t, uint32_t fd)
+{
+  struct list_elem *e;
+  struct fd_node *node;
+  for (e = list_begin(&t->fd_list); e != list_end(&t->fd_list); e = list_next(e))
+  {
+    node = list_entry(e, struct fd_node, elem);
+    if (node->fd == fd)
+      return node->file;
+  }
+  return NULL;
+}
 
 
 /* Starts a new thread running a user program loaded from
@@ -223,6 +292,7 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  process_destroy_fd_list(cur);
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
