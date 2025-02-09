@@ -206,10 +206,12 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+
   load_failed = false;
 
   strlcpy(args, file_name, MAX_CMDLINE_LENGTH);
   file_name = strtok_r(file_name, " ", &save_ptr);
+  // 将当前线程的名字设定为文件名本身
   strlcpy(thread_current()->name, (const char *)file_name, 16);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -227,6 +229,11 @@ start_process (void *file_name_)
   {
     thread_exit();
   }
+  
+  // 保证当前正在执行的文件不会被其他进程修改 
+  struct file* file = filesys_open(thread_current()->name);
+  file_deny_write(file);
+  thread_current()->exec_file = file;
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -293,7 +300,12 @@ process_exit (void)
   uint32_t *pd;
 
   process_destroy_fd_list(cur);
-  /* Destroy the current process's page directory and switch back
+  // 恢复当前进程可执行文件的可修改性
+  if (cur->exec_file != NULL)
+  {
+    file_close(cur->exec_file);
+  }
+    /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
   if (pd != NULL) 
@@ -421,6 +433,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char *args)
 
   /* Open executable file. */
   file = filesys_open (file_name);
+  t->exec_file = file;
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);

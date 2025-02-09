@@ -415,6 +415,7 @@ thread_create (const char *name, int priority,
   sema_init(&t->exec_sema, 0);
   list_init(&t->fd_list);
   t->current_fd = 1;
+  t->exec_file = NULL;
   // 初始化wait()有关事宜
   list_init(&t->pwait_list);
 

@@ -172,7 +172,30 @@ page_fault (struct intr_frame *f)
     f->eax = -1;
     return;
   }
+  
+  // 如果Page Fault发生则用户进程中, 直接杀死进程
+  if(user)
+  {
+    // 理论上不能进行系统调用, 我们在这里手动执行杀死进程的工作
+    struct semaphore *sema = NULL;
+    struct thread *cur = thread_current();
 
+    if (cur->pwait_node != NULL)
+    {
+      cur->pwait_node->status = -1;
+      //将sema指针暂时存起来, 当thread_exit后, cur指针将不再可用
+      sema = &cur->pwait_node->sema;
+    }
+   
+    // 打印Process Termination Messages
+    printf("%s: exit(%d)\n", cur->name, -1);
+
+    if (sema != NULL)
+      sema_up(sema);
+    f->eax = -1;
+    //IMPORTANT: 线程所有要做的事情都要在thread_exit()前做完!
+    thread_exit();
+  }
 
   /* Count page faults. */
   page_fault_cnt++;

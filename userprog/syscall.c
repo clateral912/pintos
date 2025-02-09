@@ -16,9 +16,27 @@
 
 #define NO_LIMIT 32768    //32768是随便想出来的一个maigic number
 
+static int get_user(const uint8_t *);
+static bool put_user(uint8_t *, uint8_t);
+static bool byte_valid(void *);
+static bool mem_valid(void *, size_t);
+static bool str_valid(const char *, uint32_t);
+static const char * check_charptr_validity(struct intr_frame *);
+static void retval(struct intr_frame *, int32_t);
 static void syscall_handler (struct intr_frame *);
-static void retval(struct intr_frame *f, int32_t);
 static void syscall_exit(struct intr_frame *, int32_t);
+static void syscall_tell(struct intr_frame *);
+static void syscall_seek(struct intr_frame *);
+static void syscall_write(struct intr_frame *);
+static void syscall_read(struct intr_frame *);
+static void syscall_filesize(struct intr_frame *);
+static void syscall_create(struct intr_frame *);
+static void syscall_remove(struct intr_frame *);
+static void syscall_open(struct intr_frame *);
+static void syscall_close(struct intr_frame *);
+static void syscall_filesize(struct intr_frame *);
+static void syscall_exec(struct intr_frame *);
+static void syscall_wait(struct intr_frame *);
 
 // arg0 位于栈中的低地址
 struct syscall_frame_3args{
@@ -149,14 +167,6 @@ retval(struct intr_frame *f, int32_t num)
 }
 
 
-static inline 
-struct intr_frame *
-syscall_get_intr_frame(void *esp)
-{
-  struct intr_frame *f = (struct intr_frame *)((char *)&(esp) - offsetof(struct intr_frame, esp));
-  return f;
-}
-
 static void
 syscall_create(struct intr_frame *f)
 {
@@ -182,6 +192,40 @@ syscall_remove(struct intr_frame *f)
   const char *file = check_charptr_validity(f);
   bool success = filesys_remove(file);
   retval(f, success);
+}
+
+static void
+syscall_seek(struct intr_frame *f)
+{
+  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_2args)))
+    syscall_exit(f, FORCE_EXIT);
+
+  struct syscall_frame_2args* args = (struct syscall_frame_2args *)((uint32_t *)(f->esp) + 1);
+
+  uint32_t fd = args->arg0;
+  uint32_t pos = args->arg1;
+
+  struct file *file = process_from_fd_get_file(thread_current(), fd);
+  if (file == NULL)
+    return ;
+
+  file_seek(file, pos);
+}
+
+static void
+syscall_tell(struct intr_frame *f)
+{
+  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(uint32_t)))
+    syscall_exit(f, FORCE_EXIT);
+
+  uint32_t fd = *((uint32_t *)(f->esp) + 1);
+
+  struct file* file = process_from_fd_get_file(thread_current(), fd);
+  if (file == NULL)
+    return ;
+
+  uint32_t pos = file_tell(file);
+  retval(f, pos);
 }
 
 static void
@@ -402,6 +446,12 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_WRITE:
       syscall_write(f);
+      break;
+    case SYS_SEEK:
+      syscall_seek(f);
+      break;
+    case SYS_TELL:
+      syscall_tell(f);
       break;
     case SYS_HALT:
       shutdown_power_off();
