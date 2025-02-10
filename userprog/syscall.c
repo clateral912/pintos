@@ -159,6 +159,18 @@ check_charptr_validity(struct intr_frame *f)
   return file;
 }
 
+// 检查esp指针后size个byte的有效性
+// 就是检查中断帧指向的栈中的参数的可访问性
+static uint32_t *
+check_args_validity(struct intr_frame *f, size_t size)
+{
+ if (!mem_valid(((uint32_t *)(f->esp) + 1), size))
+    syscall_exit(f, FORCE_EXIT);
+
+  return ((uint32_t *)(f->esp) + 1);
+
+}
+
 static inline
 void
 retval(struct intr_frame *f, int32_t num)
@@ -170,10 +182,9 @@ retval(struct intr_frame *f, int32_t num)
 static void
 syscall_create(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_2args)))
-    syscall_exit(f, FORCE_EXIT);
-  
-  struct syscall_frame_2args* args = (struct syscall_frame_2args *)((uint32_t *)(f->esp) + 1);
+  uint32_t *args_ptr = check_args_validity(f, sizeof(struct syscall_frame_2args)); 
+
+  struct syscall_frame_2args* args = (struct syscall_frame_2args *)args_ptr;
   
   const char *file = (char *)args->arg0;
   uint32_t initial_size = args->arg1;
@@ -197,10 +208,9 @@ syscall_remove(struct intr_frame *f)
 static void
 syscall_seek(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_2args)))
-    syscall_exit(f, FORCE_EXIT);
+  uint32_t *args_ptr = check_args_validity(f, sizeof(struct syscall_frame_2args)); 
 
-  struct syscall_frame_2args* args = (struct syscall_frame_2args *)((uint32_t *)(f->esp) + 1);
+  struct syscall_frame_2args* args = (struct syscall_frame_2args *)args_ptr;
 
   uint32_t fd = args->arg0;
   uint32_t pos = args->arg1;
@@ -215,10 +225,7 @@ syscall_seek(struct intr_frame *f)
 static void
 syscall_tell(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(uint32_t)))
-    syscall_exit(f, FORCE_EXIT);
-
-  uint32_t fd = *((uint32_t *)(f->esp) + 1);
+  uint32_t fd = *(check_args_validity(f, sizeof(uint32_t)));
 
   struct file* file = process_from_fd_get_file(thread_current(), fd);
   if (file == NULL)
@@ -231,10 +238,7 @@ syscall_tell(struct intr_frame *f)
 static void
 syscall_filesize(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(uint32_t)))
-    syscall_exit(f, FORCE_EXIT);
-
-  uint32_t fd = *((uint32_t *)(f->esp) + 1);
+  uint32_t fd = *(check_args_validity(f, sizeof(uint32_t)));
 
   struct file *file = process_from_fd_get_file(thread_current(), fd);
   if (file == NULL)
@@ -269,10 +273,7 @@ syscall_open(struct intr_frame *f)
 static void
 syscall_close(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(uint32_t)))
-    syscall_exit(f, FORCE_EXIT);
-
-  int fd = *((uint32_t *)(f->esp) + 1);
+  int fd = *(check_args_validity(f, sizeof(int32_t)));
   struct file *file = process_from_fd_get_file(thread_current(), fd);
   
   if (file == NULL)
@@ -285,10 +286,8 @@ syscall_close(struct intr_frame *f)
 static void
 syscall_read(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_3args)))
-    syscall_exit(f, FORCE_EXIT);
-  
-  struct syscall_frame_3args *args = (struct syscall_frame_3args *)((uint32_t *)(f->esp) + 1);
+  uint32_t *args_ptr = check_args_validity(f, sizeof(struct syscall_frame_3args));  
+  struct syscall_frame_3args *args = (struct syscall_frame_3args *)(args_ptr);
 
   uint32_t fd = args->arg0;
   void *buffer = (void *)args->arg1;
@@ -337,10 +336,7 @@ syscall_exec(struct intr_frame *f)
 static void
 syscall_wait(struct intr_frame *f)
 {
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(uint32_t)))
-    syscall_exit(f, FORCE_EXIT);
-
-  int pid = *((uint32_t *)(f->esp) + 1);
+  int pid = *(check_args_validity(f, sizeof(int)));
   int child_status;
 
   child_status = process_wait(pid);
@@ -355,12 +351,7 @@ syscall_exit(struct intr_frame *f, int status_)
   int status;
 
   if (status_ == NOT_SPECIFIED)
-  {
-    if (!mem_valid(((int32_t *)(f->esp) + 1), sizeof(int32_t)))
-      status = -1;
-    else 
-      status = *((int32_t *)(f->esp) + 1); 
-  }
+    status = *((int32_t *)check_args_validity(f, sizeof(int32_t)));
   else if (status_ == FORCE_EXIT) {
     status = -1;
   }
@@ -392,10 +383,8 @@ static void
 syscall_write(struct intr_frame *f)
 {
   // 检验内存合法性
-  if (!mem_valid(((uint32_t *)(f->esp) + 1), sizeof(struct syscall_frame_3args)))
-    syscall_exit(f, FORCE_EXIT);
-
-  struct syscall_frame_3args *args = (struct syscall_frame_3args *)((uint32_t *)(f->esp) + 1);
+  uint32_t *args_ptr = check_args_validity(f, sizeof(struct syscall_frame_3args));  
+  struct syscall_frame_3args *args = (struct syscall_frame_3args *)(args_ptr);
 
   uint32_t fd = args->arg0;
   void *buffer = (void *)args->arg1;
