@@ -433,13 +433,14 @@ load (const char *file_name, void (**eip) (void), void **esp, char *args)
 
   /* Open executable file. */
   file = filesys_open (file_name);
-  t->exec_file = file;
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
 
+  //保证加载成功才将当前进程的可执行文件设置成该文件
+  //t->exec_file = file;
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
