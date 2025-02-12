@@ -113,7 +113,7 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     int base_priority;
-    int64_t sleep_time;
+    int64_t wake_time;
     struct list_elem allelem;           /* List element for all threads list. */
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -143,6 +143,7 @@ struct thread
 extern bool thread_mlfqs;
 extern int load_avg_fp;
 extern int ready_threads;
+extern int32_t time_to_wake;
 extern struct list sleep_list;
 extern bool thread_pri_sch;
 extern struct list ready_list;

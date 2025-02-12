@@ -111,16 +111,17 @@ timer_sleep (int64_t ticks)
 
     if (ticks > 0)
     {
-        t->sleep_time = timer_ticks() + ticks;
-
-        // list_push_back(&sleep_list, &t->sleep_elem); 
+        t->wake_time= timer_ticks() + ticks;
         list_insert_ordered(&sleep_list, &t->sleep_elem, timer_compare_sleep_priority,NULL);
-        // list_sort(&sleep_list, timer_compareSleepPriority, NULL);
+        // printf("timer_sleep being called, pushed thread->wake_time = %d to sleep list\n", t->wake_time);
+        if (t->wake_time < time_to_wake || time_to_wake == -1)
+        {
+          time_to_wake = t->wake_time;
+          // printf("In timer_sleep, modified time_to_wake to: %d\n", time_to_wake);
+        }  
 
         old_level = intr_disable();
-
         thread_block();
-
         intr_set_level(old_level);
 
     }

@@ -73,6 +73,8 @@ bool thread_mlfqs;
 int ready_threads;
 int load_avg_fp;
 
+int32_t time_to_wake = -1;
+
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
@@ -285,34 +287,50 @@ thread_compare_priority(const struct list_elem *elem1, const struct list_elem *e
 }
 
 static void
-thread_wakeUp(int64_t wakeTime)
+thread_wakeUp(int32_t wakeTime)
 {
     struct list_elem *e;
+    int32_t first_min   = INT32_MAX;
+    int32_t second_min  = INT32_MAX;
 
+    printf("");
     if (list_empty(&sleep_list))
         return ;
 
     for(e = list_begin(&sleep_list); e != list_end(&sleep_list); ){
         struct thread *t = list_entry(e, struct thread, sleep_elem);
         struct list_elem *next = e->next;
-
-        if (t->sleep_time == wakeTime)
+        if (t->wake_time < first_min)
         {
-            // printf("Priority %d, current time = %lld, woke up\n", t->priority, wakeTime);
+          second_min = first_min;
+          first_min = t->wake_time;
+        }
+        else if (t->wake_time < second_min && t->wake_time != first_min)
+          second_min = t->wake_time;
+
+        if (t->wake_time == wakeTime)
+        {
             list_remove(e);
             thread_unblock(t);    
         }
 
         e = next;
     }
+
+    if (list_empty(&sleep_list))
+      time_to_wake = -1;
+
+    if (second_min != INT32_MAX)
+    {
+      time_to_wake = second_min;
+      // printf("In thread_wakeUp, modified time_to_wake to: %d\n", time_to_wake);
+    }
 }
-/* Called by the timer interrupt handler at each timer tick.
-   Thus, this function runs in an external interrupt context. */
+
 void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
-  int64_t wakeTime = timer_ticks();
   /* Update statistics. */
   if (t == idle_thread)
     idle_ticks++;
@@ -323,8 +341,12 @@ thread_tick (void)
   else
     kernel_ticks++;
 
+  if (timer_ticks() == time_to_wake)
+  {
+    // printf("Call thread_wakeUp, now ticks: %d\n", time_to_wake);
+    thread_wakeUp(time_to_wake);
+  }
 
-  thread_wakeUp(wakeTime);
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
