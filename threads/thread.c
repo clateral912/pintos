@@ -293,7 +293,8 @@ thread_wakeUp(int32_t wakeTime)
     int32_t first_min   = INT32_MAX;
     int32_t second_min  = INT32_MAX;
 
-    printf("");
+    for (int i = 10; i > 0; i--);
+
     if (list_empty(&sleep_list))
         return ;
 
