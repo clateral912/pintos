@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <syscall-nr.h>
-#include "../threads/interrupt.h"
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
 #include "../filesys/filesys.h"
@@ -24,7 +23,6 @@ static bool str_valid(const char *, uint32_t);
 static const char * check_charptr_validity(struct intr_frame *);
 static void retval(struct intr_frame *, int32_t);
 static void syscall_handler (struct intr_frame *);
-static void syscall_exit(struct intr_frame *, int32_t);
 static void syscall_tell(struct intr_frame *);
 static void syscall_seek(struct intr_frame *);
 static void syscall_write(struct intr_frame *);
@@ -171,6 +169,17 @@ check_args_validity(struct intr_frame *f, size_t size)
 
 }
 
+//从中断帧指向的栈中提取出指向参数的指针
+static uint32_t *
+get_args(struct intr_frame *f)
+{
+  uint32_t *args_ptr = ((uint32_t *)(f->esp) + 1);
+  if (!is_user_vaddr(args_ptr))
+    syscall_exit(f, FORCE_EXIT);
+
+  return args_ptr;
+}
+
 static inline
 void
 retval(struct intr_frame *f, int32_t num)
@@ -182,17 +191,17 @@ retval(struct intr_frame *f, int32_t num)
 static void
 syscall_create(struct intr_frame *f)
 {
-  uint32_t *args_ptr = check_args_validity(f, sizeof(struct syscall_frame_2args)); 
+  uint32_t *args_ptr = get_args(f); 
 
   struct syscall_frame_2args* args = (struct syscall_frame_2args *)args_ptr;
   
-  const char *file = (char *)args->arg0;
+  const char *name = (char *)args->arg0;
   uint32_t initial_size = args->arg1;
 
-  if(!str_valid(file, NO_LIMIT))
+  if (!is_user_vaddr(name) || name == NULL)
     syscall_exit(f, FORCE_EXIT);
 
-  bool success = filesys_create(file, initial_size);
+  bool success = filesys_create(name, initial_size);
   
   retval(f, success);
 }
@@ -200,7 +209,11 @@ syscall_create(struct intr_frame *f)
 static void
 syscall_remove(struct intr_frame *f)
 {
-  const char *file = check_charptr_validity(f);
+  const char *file = (const char *)(*get_args(f));
+
+  if (!is_user_vaddr(file) || file == NULL)
+    syscall_exit(f, -1);
+
   bool success = filesys_remove(file);
   retval(f, success);
 }
@@ -208,7 +221,7 @@ syscall_remove(struct intr_frame *f)
 static void
 syscall_seek(struct intr_frame *f)
 {
-  uint32_t *args_ptr = check_args_validity(f, sizeof(struct syscall_frame_2args)); 
+  uint32_t *args_ptr = get_args(f); 
 
   struct syscall_frame_2args* args = (struct syscall_frame_2args *)args_ptr;
 
@@ -225,7 +238,7 @@ syscall_seek(struct intr_frame *f)
 static void
 syscall_tell(struct intr_frame *f)
 {
-  uint32_t fd = *(check_args_validity(f, sizeof(uint32_t)));
+  uint32_t fd = *(get_args(f));
 
   struct file* file = process_from_fd_get_file(thread_current(), fd);
   if (file == NULL)
@@ -238,7 +251,7 @@ syscall_tell(struct intr_frame *f)
 static void
 syscall_filesize(struct intr_frame *f)
 {
-  uint32_t fd = *(check_args_validity(f, sizeof(uint32_t)));
+  uint32_t fd = *(get_args(f));
 
   struct file *file = process_from_fd_get_file(thread_current(), fd);
   if (file == NULL)
@@ -254,7 +267,13 @@ static void
 syscall_open(struct intr_frame *f)
 {
   uint32_t fd;
-  const char *file_name = check_charptr_validity(f);
+  const char *file_name = (const char *)(*get_args(f));
+  if (!is_user_vaddr(file_name) || file_name == NULL)
+  {
+    retval(f, -1);
+    return ;
+  }
+
   struct file *file = filesys_open(file_name);
   // file==NULL的情况有内部内存分配错误, 以及未找到文件
   // 未找到文件的情况在此处处理
@@ -273,7 +292,7 @@ syscall_open(struct intr_frame *f)
 static void
 syscall_close(struct intr_frame *f)
 {
-  int fd = *(check_args_validity(f, sizeof(int32_t)));
+  int fd = *(get_args(f));
   struct file *file = process_from_fd_get_file(thread_current(), fd);
   
   if (file == NULL)
@@ -286,16 +305,16 @@ syscall_close(struct intr_frame *f)
 static void
 syscall_read(struct intr_frame *f)
 {
-  uint32_t *args_ptr = check_args_validity(f, sizeof(struct syscall_frame_3args));  
+  uint32_t *args_ptr = get_args(f);  
   struct syscall_frame_3args *args = (struct syscall_frame_3args *)(args_ptr);
 
   uint32_t fd = args->arg0;
   void *buffer = (void *)args->arg1;
   size_t size = args->arg2;
-
-  if(!mem_valid(buffer, size))
-    syscall_exit(f, FORCE_EXIT);
   
+  if (!is_user_vaddr(buffer) || buffer == NULL)
+    syscall_exit(f, FORCE_EXIT);
+
   if (fd == 0)
   {
     // 手册说的不清楚! 当fd为0时返回什么?
@@ -303,6 +322,7 @@ syscall_read(struct intr_frame *f)
     retval(f, key);
     return ;
   }
+
   struct file *file = process_from_fd_get_file(thread_current(), fd);
   if (file == NULL)
   {
@@ -316,7 +336,7 @@ syscall_read(struct intr_frame *f)
 static void
 syscall_exec(struct intr_frame *f)
 {
-  const char *file = check_charptr_validity(f);
+  const char *file = (const char *)(*get_args(f));
 
   int pid;
   
@@ -326,7 +346,10 @@ syscall_exec(struct intr_frame *f)
 
   if (pid == TID_ERROR || load_failed)
   {
+    lock_acquire(&load_failure_lock);
     load_failed = false;
+    lock_release(&load_failure_lock);
+
     retval(f, -1);
   }
   else
@@ -336,7 +359,7 @@ syscall_exec(struct intr_frame *f)
 static void
 syscall_wait(struct intr_frame *f)
 {
-  int pid = *(check_args_validity(f, sizeof(int)));
+  int pid = *(get_args(f));
   int child_status;
 
   child_status = process_wait(pid);
@@ -345,13 +368,13 @@ syscall_wait(struct intr_frame *f)
 }
 
 //第二个参数用于手动控制退出的参数
-static void
+void
 syscall_exit(struct intr_frame *f, int status_)
 {
   int status;
 
   if (status_ == NOT_SPECIFIED)
-    status = *((int32_t *)check_args_validity(f, sizeof(int32_t)));
+    status = *((int32_t *)get_args(f));
   else if (status_ == FORCE_EXIT) {
     status = -1;
   }
@@ -383,15 +406,12 @@ static void
 syscall_write(struct intr_frame *f)
 {
   // 检验内存合法性
-  uint32_t *args_ptr = check_args_validity(f, sizeof(struct syscall_frame_3args));  
+  uint32_t *args_ptr = get_args(f);  
   struct syscall_frame_3args *args = (struct syscall_frame_3args *)(args_ptr);
 
   uint32_t fd = args->arg0;
   void *buffer = (void *)args->arg1;
   size_t size = args->arg2;
-
-  if(!mem_valid(buffer, size))
-    syscall_exit(f, FORCE_EXIT);
 
   // 仅对printf做初步的支持
   if (fd == 1)
@@ -412,17 +432,13 @@ syscall_write(struct intr_frame *f)
 void
 syscall_init (void) 
 {
+  lock_init(&load_failure_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
 static void
 syscall_handler (struct intr_frame *f) 
 {
-  // 校验esp指针的合法性, 我们在下面将esp作为uint32_t类型来解引用
-  // 故在此处要检验四个字节的合法性
-  if (!mem_valid(f->esp, sizeof(uint32_t)))
-    syscall_exit(f, FORCE_EXIT);
-
   unsigned int syscall_no = *(uint32_t *)(f->esp);
 
   switch(syscall_no)

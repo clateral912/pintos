@@ -25,7 +25,7 @@ static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp, char *args);
 
 bool load_failed;
-
+struct lock load_failure_lock;
 // 为当前线程初始化堆栈
 // 根据args, 在栈上压入argc与agrv
 // 专门为main函数压栈
@@ -207,7 +207,9 @@ start_process (void *file_name_)
   bool success;
 
 
+  lock_acquire(&load_failure_lock);
   load_failed = false;
+  lock_release(&load_failure_lock);
 
   strlcpy(args, file_name, MAX_CMDLINE_LENGTH);
   file_name = strtok_r(file_name, " ", &save_ptr);
@@ -223,7 +225,11 @@ start_process (void *file_name_)
   /* If load failed, quit. */
   // load()执行完毕, 则把之前分配的内存释放
   palloc_free_page (file_name);
+
+  lock_acquire(&load_failure_lock);
   load_failed = !success;
+  lock_release(&load_failure_lock);
+
   sema_up(&thread_current()->pwait_node->parent->exec_sema);
   if (load_failed)
   {

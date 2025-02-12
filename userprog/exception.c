@@ -164,17 +164,17 @@ page_fault (struct intr_frame *f)
   // 仅仅通过kernel出现Page Fault加上错误地址来自用户内存空间, 就可以判断
   // Page Fault一定来自syscall部分吗? 这对吗?
   // TODO: 明确判断系统调用产生的Page Fault的逻辑
-  if (from_user_vm && !user)
-  {
+  // if (from_user_vm && !user)
+  // {
     //然后我们就可以断定, 这个页面错误来自系统调用
-    //以下对esp, eip的操作仅供get_user()和put_user()使用
-    f->eip = (void (*) (void)) f->eax;
-    f->eax = -1;
-    return;
-  }
+    //以下对esp, eip的操作仅供get_user()和put_user()/* � */��用
+    // f->eip = (void (*) (void)) f->eax;
+    // f->eax = -1;
+    // return;
+  // }
   
   // 如果Page Fault发生则用户进程中, 直接杀死进程
-  if(user)
+  if(from_user_vm || user)
   {
     // 理论上不能进行系统调用, 我们在这里手动执行杀死进程的工作
     struct semaphore *sema = NULL;
