@@ -293,6 +293,8 @@ thread_wakeUp(int32_t wakeTime)
     int32_t first_min   = INT32_MAX;
     int32_t second_min  = INT32_MAX;
 
+    // 要想通过bochs的测试, 必须加这个循环!
+    // 你可以试试看不加的效果, 跑mlfqs-load-60会在t=118时卡死
     for (int i = 10; i > 0; i--);
 
     if (list_empty(&sleep_list))

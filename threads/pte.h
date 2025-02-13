@@ -99,6 +99,7 @@ static inline uint32_t pte_create_user (void *page, bool writable) {
 
 /* Returns a pointer to the page that page table entry PTE points
    to. */
+// 返回的是内核虚拟地址!
 static inline void *pte_get_page (uint32_t pte) {
   return ptov (pte & PTE_ADDR);
 }

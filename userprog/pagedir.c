@@ -67,11 +67,15 @@ pagedir_destroy (uint32_t *pd)
    pointer is returned. */
 // 返回vaddr所在page在Page Table中的PTE的地址, 
 // 或者说, 返回指向一个PTE的地址, 这个PTE指向的page中包含vaddr 
-// 如果包含vaddr的Page Table不存在(尚未分配), 那么看create的值决定是否创建新的PTE
+// 如果包含vaddr的Page Table不存在(尚未分配), 那么看create的值决定是否创建新的Page Table
 // (是否创建新的Page Table)
-static uint32_t *
+uint32_t *
 lookup_page (uint32_t *pd, const void *vaddr, bool create)
 {
+  // 函数的整体思路:
+  // 先通过传入的参数pd找到进程的页目录, 随后利用虚拟地址的高10位定位页表的位置(即找到PDE)
+  // 通过提取PDE的高20位得到页表的地址, 随后访问页表, 以vaddr的中间10位作为索引, 找到对应的pte
+  // 通过&pt[pt_no(vaddr)]返回一个指向PTE的指针
   uint32_t *pt, *pde;
 
   ASSERT (pd != NULL);
@@ -140,8 +144,8 @@ pagedir_set_page (uint32_t *pd, void *upage, void *kpage, bool writable)
   ASSERT (vtop (kpage) >> PTSHIFT < init_ram_pages);
   ASSERT (pd != init_page_dir);
 
-  // 先在进程的页目录中创建一个pte, 指向upage
-  // 注意! 此处pte是一个指针/地址! 指向Page Directory中的某一条pte
+  // 先在获取一个pte, 指向upage
+  // 注意! 此处pte是一个指针/地址! 指向upage所属的Page Table中的某一条pte
   pte = lookup_page (pd, upage, true);
 
 
@@ -176,6 +180,7 @@ pagedir_get_page (uint32_t *pd, const void *uaddr)
   pte = lookup_page (pd, uaddr, false);
   if (pte != NULL && (*pte & PTE_P) != 0)
     // 返回一个内核虚拟地址, *pte的高20位是实际物理地址!
+    // 这意味着内核利用这个函数可用访问用户页面uaddr指向的内容了!
     return pte_get_page (*pte) + pg_ofs (uaddr);
     // 必须注意一点: 无论虚拟内存地址如何, 
     // 虚拟地址的低12位offset一定是与实际物理地址的低12位完全一样!

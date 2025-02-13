@@ -138,7 +138,7 @@ page_fault (struct intr_frame *f)
   bool not_present;  /* True: not-present page, false: writing r/o page. */
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
-  bool from_user_vm; /* 造成Page Fault的地址来自用户内存空间 */
+  bool from_user_vm; /* é æPage Faultçå°åæ¥èªç¨æ·åå­ç©ºé´ */
   void *fault_addr;  /* Fault address. */
 
   /* Obtain faulting address, the virtual address that was
@@ -161,39 +161,23 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
   from_user_vm = is_user_vaddr(fault_addr);
-  // 仅仅通过kernel出现Page Fault加上错误地址来自用户内存空间, 就可以判断
-  // Page Fault一定来自syscall部分吗? 这对吗?
-  // TODO: 明确判断系统调用产生的Page Fault的逻辑
-  // if (from_user_vm && !user)
-  // {
-    //然后我们就可以断定, 这个页面错误来自系统调用
-    //以下对esp, eip的操作仅供get_user()和put_user()/* � */��用
-    // f->eip = (void (*) (void)) f->eax;
-    // f->eax = -1;
-    // return;
-  // }
-  
-  // 如果Page Fault发生则用户进程中, 直接杀死进程
+
   if(from_user_vm || user)
   {
-    // 理论上不能进行系统调用, 我们在这里手动执行杀死进程的工作
     struct semaphore *sema = NULL;
     struct thread *cur = thread_current();
 
     if (cur->pwait_node != NULL)
     {
       cur->pwait_node->status = -1;
-      //将sema指针暂时存起来, 当thread_exit后, cur指针将不再可用
       sema = &cur->pwait_node->sema;
     }
    
-    // 打印Process Termination Messages
     printf("%s: exit(%d)\n", cur->name, -1);
 
     if (sema != NULL)
       sema_up(sema);
     f->eax = -1;
-    //IMPORTANT: 线程所有要做的事情都要在thread_exit()前做完!
     thread_exit();
   }
 
