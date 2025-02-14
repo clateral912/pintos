@@ -49,6 +49,26 @@ struct fd_node
   struct list_elem elem;
 };
 
+struct mmap_vma_node
+{
+  uint32_t fd;
+  void *mmap_seg_begin;
+  void *mmap_seg_end;
+  struct list_elem elem;
+};
+
+struct vma 
+{
+  void *code_seg_begin;
+  void *code_seg_end;
+
+  struct list mmap_vma_list;
+
+  void *stack_seg_begin;
+  void *stack_seg_end;
+};
+
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -122,6 +142,7 @@ struct thread
 //#ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct vma vma;
     struct file* exec_file;
     struct pwait_node_ *pwait_node; 
     struct list pwait_list;

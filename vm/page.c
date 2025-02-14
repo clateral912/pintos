@@ -4,6 +4,7 @@
 #include "../threads/malloc.h"
 #include "../threads/synch.h"
 #include "../userprog/pagedir.h"
+#include "list.h"
 #include "stdbool.h"
 #include "virtual-memory.h"
 #include <stdint.h>
@@ -119,7 +120,7 @@ page_process_init(struct thread *t)
 // 完成初始化并将其加入对应进程持有的页面目录中
 // 返回一个Page Node对象
 struct page_node *
-page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location loc)
+page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location loc, enum role role)
 {
   //保证添加的pte一定对应一个已经存在的页
   if (loc == LOC_MEMORY)
@@ -222,10 +223,10 @@ page_assign_frame(struct page_node *pnode, struct frame_node *fnode)
 // 并在当前进程的process page list中添加一个node 
 // 再把它们链接起来
 bool
-page_get_page(struct thread *t, const void *uaddr, uint32_t flags)
+page_get_page(struct thread *t, const void *uaddr, uint32_t flags, enum role role)
 {
   struct frame_node *fnode = frame_allocate_page(t->pagedir, uaddr, flags);
-  struct page_node  *pnode = page_add_page(t, uaddr, flags, LOC_NOT_PRESENT);
+  struct page_node  *pnode = page_add_page(t, uaddr, flags, LOC_NOT_PRESENT, role);
   if (fnode == NULL)
     return false;
 
@@ -249,3 +250,32 @@ page_free_page(struct thread *t, const void *uaddr)
   page_page_destructor(&page_node->helem, (void *)t);
 }
 
+//检查传入的uaddr在数据段中的合法性, 返回其位于哪个数据段(role)
+//若uaddr不合法, 返回SEG_INVALID
+enum role
+page_check_role(struct thread *t, const void *uaddr)
+{
+  void *esp = t->vma.stack_seg_end;
+
+  if (uaddr >= t->vma.code_seg_begin && uaddr <= t->vma.code_seg_end)
+    return SEG_CODE;
+
+  if (uaddr >= t->vma.stack_seg_begin && uaddr <= t->vma.stack_seg_end)
+    return SEG_STACK;
+
+  if (uaddr == ((uint8_t *)(esp) + 4) || uaddr == ((uint8_t *)(esp) + 32))
+    return SEG_STACK;
+
+  struct list mmap_list = t->vma.mmap_vma_list;
+  struct list_elem *e;
+  struct mmap_vma_node *mnode;
+
+  for (e = list_begin(&mmap_list); e != list_end(&mmap_list); e = list_next(e))
+  {
+    mnode = list_entry(e, struct mmap_vma_node, elem);
+    if (uaddr >= mnode->mmap_seg_begin && uaddr <= mnode->mmap_seg_end)
+      return SEG_MMAP;
+  }
+
+  return SEG_INVALID;
+}

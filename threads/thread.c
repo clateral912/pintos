@@ -85,6 +85,7 @@ static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 static void thread_destroy_pwait_list(struct thread *);
+static void thread_vma_init(struct thread *);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 void thread_iterate_ready_list(void);
@@ -122,6 +123,7 @@ thread_init (void)
   sema_init(&initial_thread->exec_sema, 0);
   list_init(&initial_thread->pwait_list);
   list_init(&initial_thread->fd_list);
+  thread_vma_init(initial_thread);
   initial_thread->current_fd = 1;
   initial_thread->status = THREAD_RUNNING;
   initial_thread->page_default_flags = 0;
@@ -143,6 +145,17 @@ thread_start (void)
 
   /* Wait for the idle thread to initialize idle_thread. */
   sema_down (&idle_started);
+}
+
+static void
+thread_vma_init(struct thread *t)
+{
+  t->vma.code_seg_begin   = NULL;
+  t->vma.code_seg_end     = NULL;
+  t->vma.stack_seg_begin  = NULL;
+  t->vma.stack_seg_end    = NULL;
+
+  list_init(&t->vma.mmap_vma_list);
 }
 
 // 接受优先级捐赠，更改当前优先级
@@ -445,7 +458,6 @@ thread_create (const char *name, int priority,
   // 初始化wait()有关事宜
   list_init(&t->pwait_list);
 
-  t->page_default_flags = 0;
   //初始化自己的node
   t->pwait_node = malloc(sizeof(struct pwait_node_));
   if (t->pwait_node == NULL)
@@ -459,6 +471,11 @@ thread_create (const char *name, int priority,
   t->pwait_node->status     =   NOT_SPECIFIED;
 
   list_push_back(&(cur->pwait_list), &(t->pwait_node->elem));
+
+  //Project 3: Virtual memory
+
+  t->page_default_flags = 0;
+  thread_vma_init(t);
 
   /* Add to run queue. */
   thread_unblock (t);

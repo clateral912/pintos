@@ -16,6 +16,12 @@ enum location{
   LOC_NOT_PRESENT
 };
 
+enum role{
+  SEG_STACK,
+  SEG_CODE,
+  SEG_MMAP,
+  SEG_INVALID
+};
 
 //  以下所有数据结构都定义在内核虚拟内存中, 保证全局可见性
 
@@ -45,6 +51,7 @@ struct page_node
   pid_t owner;                      //页面持有者: 某个用户进程
   bool sharing;                     //是否支持shairng
   enum location loc;                //页面当前位置: 内存中/swap中/文件中/尚未存在
+  enum role role;                   //页面的角色(存储的是哪种类型的数据)
   void *upage;                      //页面的用户虚拟地址, 低12位为0
                                     //用户虚拟地址(uaddr)的高20位(Page Directory Index + Page Table Index), 
   struct frame_node* frame_node;    //如果页面在内存中, 指向一个物理frame对象, 不在内存中则为NULL
