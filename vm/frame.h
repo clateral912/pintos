@@ -5,8 +5,9 @@
 #include "virtual-memory.h"
 #include <stdint.h>
 
-#define FRM_RO 0
-#define FRM_RW 1
+// flags = 0, 说明生成的页面RW, 不zero, 可驱逐, 不sharing
+#define FRM_RW 0
+#define FRM_RO 1
 #define FRM_ZERO 2
 #define FRM_NO_EVICT 4
 #define PG_SHARING 8

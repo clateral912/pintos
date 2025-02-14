@@ -124,6 +124,7 @@ thread_init (void)
   list_init(&initial_thread->fd_list);
   initial_thread->current_fd = 1;
   initial_thread->status = THREAD_RUNNING;
+  initial_thread->page_default_flags = 0;
   initial_thread->tid = allocate_tid ();
 }
 
@@ -444,6 +445,7 @@ thread_create (const char *name, int priority,
   // 初始化wait()有关事宜
   list_init(&t->pwait_list);
 
+  t->page_default_flags = 0;
   //初始化自己的node
   t->pwait_node = malloc(sizeof(struct pwait_node_));
   if (t->pwait_node == NULL)

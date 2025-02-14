@@ -32,7 +32,7 @@ frame_allocate_page(uint32_t *pd, const void *uaddr, uint32_t flags)
   bool success;
   //解码各个flag
   bool zeroed     = flags & FRM_ZERO;
-  bool writable   = flags & FRM_RW;
+  bool writable   = !(flags & FRM_RO);
   bool evictable  = !(flags & FRM_NO_EVICT);
 
   // 在用户内存池中获取一个用户页面
@@ -43,17 +43,19 @@ frame_allocate_page(uint32_t *pd, const void *uaddr, uint32_t flags)
   void *kpage = palloc_get_page(palloc_flag);
   if (kpage == NULL)
   {
-    printf("frame_allocate_page(): Cannot allocate memory for kpage!\n");
+    free(node);
+    PANIC("frame_allocate_page(): Cannot allocate memory for kpage! Maybe no more pages?\n");
     return NULL;
   }
 
-  // 获取upage, 即把uaddr右移12位
+  // 获取upage, 即uaddr的高20位, 低12位为0 
   void *upage = pg_round_down(uaddr);
 
   // pagedir_set_page中分配了upage的PTE并创建其所在的页表
   success = pagedir_set_page(pd, upage, kpage, writable);
   if (!success)
   {
+    free(node);
     printf("frame_allocate_page(): Cannot set kpage to upage!\n");
     return NULL;
   }

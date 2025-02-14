@@ -2,9 +2,13 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include "gdt.h"
+#include "syscall.h"
 #include "../threads/interrupt.h"
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
+#include "../vm/frame.h"
+#include "../vm/page.h"
+
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -140,7 +144,6 @@ page_fault (struct intr_frame *f)
   bool user;         /* True: access by user, false: access by kernel. */
   bool from_user_vm; /* é æPage Faultçå°åæ¥èªç¨æ·åå­ç©ºé´ */
   void *fault_addr;  /* Fault address. */
-
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
      data.  It is not necessarily the address of the instruction
@@ -154,32 +157,42 @@ page_fault (struct intr_frame *f)
      be assured of reading CR2 before it changed). */
   intr_enable ();
 
-
+  struct thread *cur = thread_current();
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
   from_user_vm = is_user_vaddr(fault_addr);
-  // 以下为project3的代码
-  // if(from_user_vm || user)
-  // {
-  //   struct semaphore *sema = NULL;
-  //   struct thread *cur = thread_current();
-  //
-  //   if (cur->pwait_node != NULL)
-  //   {
-  //     cur->pwait_node->status = -1;
-  //     sema = &cur->pwait_node->sema;
-  //   }
-  //  
-  //   printf("%s: exit(%d)\n", cur->name, -1);
-  //
-  //   if (sema != NULL)
-  //     sema_up(sema);
-  //   f->eax = -1;
-  //   thread_exit();
-  // }
+
+  // 用户空间发生的错误且addr指向了内核空间: 一定是不合法的访问! 杀死进程
+  if (!from_user_vm && user)
+    syscall_exit(f, -1);
+
+  // 用户进程尝试向不存在的内存区域读取数据, 一定是不合法的访问!杀死进程
+  if (not_present && !write && user)
+    syscall_exit(f, -1);
+
+  if (from_user_vm)
+  {
+    struct page_node *page = page_seek(cur, fault_addr);    
+    // 如果没有在SPT里找到page:
+    if (page == NULL)
+    {
+      // 分配页面
+      page_get_page(cur, fault_addr, cur->page_default_flags);
+      // 返回原位继续执行
+      return ;
+    }
+    else 
+    {
+      // TODO: 从swap中拉取内存页面
+      // 如果用户进程在页面存在的情况下, 向只读内存区域进行读取, 一定是不合法的访问!
+      if (write && user)
+        syscall_exit(f, -1);
+    }
+  }
+  
 
   // /* Count page faults. */
   page_fault_cnt++;

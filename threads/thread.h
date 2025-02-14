@@ -48,6 +48,7 @@ struct fd_node
   struct file *file;
   struct list_elem elem;
 };
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -133,6 +134,7 @@ struct thread
     int lock_cnt;
     int nice;
     int recent_cpu_fp;
+    uint32_t page_default_flags;
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };

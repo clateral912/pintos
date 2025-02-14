@@ -149,7 +149,10 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
   bool success = (hash_insert(&process_node->page_list, &node->helem) == NULL) ? true : false;
   
   if (!success)
+  {
+    free(node);
     return NULL;
+  }
 
   return node;
 }
@@ -223,7 +226,7 @@ page_get_page(struct thread *t, const void *uaddr, uint32_t flags)
 {
   struct frame_node *fnode = frame_allocate_page(t->pagedir, uaddr, flags);
   struct page_node  *pnode = page_add_page(t, uaddr, flags, LOC_NOT_PRESENT);
-  if (fnode == NULL || pnode == NULL)
+  if (fnode == NULL)
     return false;
 
   page_assign_frame(pnode, fnode);

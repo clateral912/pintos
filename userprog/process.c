@@ -602,6 +602,25 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
 // read_bytes + zero_bytes 可以为4096(PGSIZE)的倍数! 不一定是4096!
+      // /* Get a page of memory. */
+      // uint8_t *kpage = palloc_get_page (PAL_USER);
+      // if (kpage == NULL)
+      //   return false;
+      //
+      // /* Load this page. */
+      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      //   {
+      //     palloc_free_page (kpage);
+      //     return false; 
+      //   }
+      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
+      //
+      // /* Add the page to the process's address space. */
+      // if (!install_page (upage, kpage, writable)) 
+      //   {
+      //     palloc_free_page (kpage);
+      //     return false; 
+      //   }
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
@@ -610,7 +629,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
+  struct thread *cur = thread_current();
   file_seek (file, ofs);
+
+
+  cur->page_default_flags = FRM_ZERO | FRM_RW | FRM_NO_EVICT;
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       /* Calculate how to fill this page.
@@ -618,32 +641,20 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
-
       /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      if (file_read (file, upage, page_read_bytes) != (int) page_read_bytes)
         {
-          palloc_free_page (kpage);
+          palloc_free_page (upage);
           return false; 
         }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
+      memset (upage + page_read_bytes, 0, page_zero_bytes);
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
     }
+  cur->page_default_flags = 0;
   return true;
 }
 
@@ -652,20 +663,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  // uint8_t *kpage;
-  // bool success = false;
-  //
-  // kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  // if (kpage != NULL) 
-  //   {
-  //     success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-  //     if (success)
-  //       *esp = PHYS_BASE;
-  //     else
-  //       palloc_free_page (kpage);
-  //   }
-  // return success;
-
   bool success = false;
   success = page_get_page(thread_current(), ((uint8_t *) PHYS_BASE) - PGSIZE, FRM_ZERO | FRM_RW);
   if (success)
