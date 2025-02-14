@@ -31,6 +31,8 @@
 #else
 #include "../tests/threads/tests.h"
 #endif
+#include "../vm/page.h"
+#include "../vm/frame.h"
 #ifdef FILESYS
 #include "devices/block.h"
 #include "devices/ide.h"
@@ -127,6 +129,10 @@ pintos_init (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
+  
+  page_init();
+  frame_init();
+
   printf ("Boot complete.\n");
   printf ("kituro from here!\n");
   

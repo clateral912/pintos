@@ -161,27 +161,27 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
   from_user_vm = is_user_vaddr(fault_addr);
+  // 以下为project3的代码
+  // if(from_user_vm || user)
+  // {
+  //   struct semaphore *sema = NULL;
+  //   struct thread *cur = thread_current();
+  //
+  //   if (cur->pwait_node != NULL)
+  //   {
+  //     cur->pwait_node->status = -1;
+  //     sema = &cur->pwait_node->sema;
+  //   }
+  //  
+  //   printf("%s: exit(%d)\n", cur->name, -1);
+  //
+  //   if (sema != NULL)
+  //     sema_up(sema);
+  //   f->eax = -1;
+  //   thread_exit();
+  // }
 
-  if(from_user_vm || user)
-  {
-    struct semaphore *sema = NULL;
-    struct thread *cur = thread_current();
-
-    if (cur->pwait_node != NULL)
-    {
-      cur->pwait_node->status = -1;
-      sema = &cur->pwait_node->sema;
-    }
-   
-    printf("%s: exit(%d)\n", cur->name, -1);
-
-    if (sema != NULL)
-      sema_up(sema);
-    f->eax = -1;
-    thread_exit();
-  }
-
-  /* Count page faults. */
+  // /* Count page faults. */
   page_fault_cnt++;
 
   /* To implement virtual memory, delete the rest of the function

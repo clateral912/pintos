@@ -19,6 +19,9 @@
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
 #include "../threads/synch.h"
+#include "../vm/virtual-memory.h"
+#include "../vm/frame.h"
+#include "../vm/page.h"
 
 static void* process_push_arguments(uint8_t *esp, char *args);
 static thread_func start_process NO_RETURN;
@@ -211,6 +214,8 @@ start_process (void *file_name_)
   load_failed = false;
   lock_release(&load_failure_lock);
 
+  page_process_init(thread_current());
+
   strlcpy(args, file_name, MAX_CMDLINE_LENGTH);
   file_name = strtok_r(file_name, " ", &save_ptr);
   // 将当前线程的名字设定为文件名本身
@@ -232,9 +237,7 @@ start_process (void *file_name_)
 
   sema_up(&thread_current()->pwait_node->parent->exec_sema);
   if (load_failed)
-  {
     thread_exit();
-  }
   
   // 保证当前正在执行的文件不会被其他进程修改 
   struct file* file = filesys_open(thread_current()->name);
@@ -649,18 +652,27 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  uint8_t *kpage;
-  bool success = false;
+  // uint8_t *kpage;
+  // bool success = false;
+  //
+  // kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  // if (kpage != NULL) 
+  //   {
+  //     success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+  //     if (success)
+  //       *esp = PHYS_BASE;
+  //     else
+  //       palloc_free_page (kpage);
+  //   }
+  // return success;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
-    }
+  bool success = false;
+  success = page_get_page(thread_current(), ((uint8_t *) PHYS_BASE) - PGSIZE, FRM_ZERO | FRM_RW);
+  if (success)
+    *esp = PHYS_BASE;
+  else
+    page_free_page(thread_current(), ((uint8_t *) PHYS_BASE) - PGSIZE);
+
   return success;
 }
 

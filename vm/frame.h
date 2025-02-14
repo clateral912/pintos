@@ -9,6 +9,7 @@
 #define FRM_RW 1
 #define FRM_ZERO 2
 #define FRM_NO_EVICT 4
+#define PG_SHARING 8
 
 extern struct list frame_list;
 

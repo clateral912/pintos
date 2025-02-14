@@ -15,6 +15,7 @@ void frame_init()
   list_init(&frame_list);
 }
 
+// TODO: 尚未实现evict功能!
 // 根据uaddr, 分配uaddr所在的页面
 // 为进程分配一页新的内存页面, 先获取一页kapge,
 // 再将kpage映射到upage上
@@ -47,7 +48,7 @@ frame_allocate_page(uint32_t *pd, const void *uaddr, uint32_t flags)
   }
 
   // 获取upage, 即把uaddr右移12位
-  void *upage = (void *)pg_no(uaddr);
+  void *upage = pg_round_down(uaddr);
 
   // pagedir_set_page中分配了upage的PTE并创建其所在的页表
   success = pagedir_set_page(pd, upage, kpage, writable);
