@@ -13,5 +13,6 @@ void page_destroy_pagelist(struct thread *);
 void page_assign_frame(struct page_node *, struct frame_node *);
 bool page_get_page(struct thread *t, const void *uaddr, uint32_t flags, enum role role);
 void page_free_page(struct thread *t, const void *uaddr);
+enum role page_check_role(struct thread *t, const void *uaddr);
 
 #endif // !VM_PAGE_H

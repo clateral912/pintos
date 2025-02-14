@@ -632,10 +632,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   struct thread *cur = thread_current();
   file_seek (file, ofs);
 
-
+  cur->vma.code_seg_begin = upage;
+  cur->vma.code_seg_end   = upage;
   cur->page_default_flags = FRM_ZERO | FRM_RW | FRM_NO_EVICT;
+
   while (read_bytes > 0 || zero_bytes > 0) 
     {
+      cur->vma.code_seg_end += 1;
       /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
          and zero the final PAGE_ZERO_BYTES bytes. */
@@ -644,7 +647,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Load this page. */
       if (file_read (file, upage, page_read_bytes) != (int) page_read_bytes)
         {
-          palloc_free_page (upage);
+          page_free_page(cur, upage);
           return false; 
         }
       memset (upage + page_read_bytes, 0, page_zero_bytes);
@@ -654,7 +657,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
     }
+
   cur->page_default_flags = 0;
+
   return true;
 }
 
@@ -663,10 +668,15 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
+  struct thread *cur = thread_current();
   bool success = false;
-  success = page_get_page(thread_current(), ((uint8_t *) PHYS_BASE) - PGSIZE, FRM_ZERO | FRM_RW);
+  success = page_get_page(cur, ((uint8_t *) PHYS_BASE) - PGSIZE, FRM_ZERO | FRM_RW, SEG_STACK);
   if (success)
+  {
+    cur->vma.stack_seg_end = PHYS_BASE;
+    cur->vma.stack_seg_begin = PHYS_BASE;
     *esp = PHYS_BASE;
+  }
   else
     page_free_page(thread_current(), ((uint8_t *) PHYS_BASE) - PGSIZE);
 

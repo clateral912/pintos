@@ -4,7 +4,7 @@
 #include "../threads/malloc.h"
 #include "../threads/synch.h"
 #include "../userprog/pagedir.h"
-#include "list.h"
+#include <list.h>
 #include "stdbool.h"
 #include "virtual-memory.h"
 #include <stdint.h>
@@ -257,7 +257,8 @@ page_check_role(struct thread *t, const void *uaddr)
 {
   void *esp = t->vma.stack_seg_end;
 
-  if (uaddr >= t->vma.code_seg_begin && uaddr <= t->vma.code_seg_end)
+  // 注意! 地址不包含end!
+  if (uaddr >= t->vma.code_seg_begin && uaddr < t->vma.code_seg_end)
     return SEG_CODE;
 
   if (uaddr >= t->vma.stack_seg_begin && uaddr <= t->vma.stack_seg_end)
@@ -266,11 +267,11 @@ page_check_role(struct thread *t, const void *uaddr)
   if (uaddr == ((uint8_t *)(esp) + 4) || uaddr == ((uint8_t *)(esp) + 32))
     return SEG_STACK;
 
-  struct list mmap_list = t->vma.mmap_vma_list;
+  struct list *mmap_list = &t->vma.mmap_vma_list;
   struct list_elem *e;
   struct mmap_vma_node *mnode;
 
-  for (e = list_begin(&mmap_list); e != list_end(&mmap_list); e = list_next(e))
+  for (e = list_begin(mmap_list); e != list_end(mmap_list); e = list_next(e))
   {
     mnode = list_entry(e, struct mmap_vma_node, elem);
     if (uaddr >= mnode->mmap_seg_begin && uaddr <= mnode->mmap_seg_end)

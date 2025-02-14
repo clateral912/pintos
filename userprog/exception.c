@@ -158,6 +158,18 @@ page_fault (struct intr_frame *f)
   intr_enable ();
 
   struct thread *cur = thread_current();
+  // 更新VMA中的栈空间结束处
+  // 如果是因为栈增长导致的Demand Paging, 那么esp指针
+  // 一定会落在可用内存范围内(位于VMA的stack段内)
+  // 此时更新stack段的begin
+  if (page_check_role(cur, fault_addr)  == SEG_INVALID)
+  {
+    if (page_check_role(cur, f->esp) == SEG_STACK && (fault_addr >= ((void *)((uint8_t *)(f->esp) - 32))))
+      cur->vma.stack_seg_begin = f->esp;
+    else
+      syscall_exit(f, -1);    //如果esp不再Stack Segment中, 那么进程一定错误地移动了栈指针
+                              //或者访问了不合法的数据段, 必须杀死进程!
+  }
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
@@ -179,8 +191,29 @@ page_fault (struct intr_frame *f)
     // 如果没有在SPT里找到page:
     if (page == NULL)
     {
+      // 检验fault_addr的合法性
+      enum role role = page_check_role(cur, fault_addr);
+      if (role == SEG_INVALID)
+        syscall_exit(f, -1);
       // 分配页面
-      page_get_page(cur, fault_addr, cur->page_default_flags);
+      page_get_page(cur, fault_addr, cur->page_default_flags, role);
+      // 更新进程的VMA
+      switch(role)
+      {
+        case SEG_STACK:
+          // 注意! 栈是向下生长的!
+          cur->vma.stack_seg_begin = (uint8_t *)(cur->vma.stack_seg_begin) - PGSIZE;
+          break;
+        case SEG_CODE:
+          cur->vma.code_seg_end = (uint8_t *)(cur->vma.code_seg_end) + PGSIZE;
+          break;
+        case SEG_INVALID:
+          NOT_REACHED();
+          break;
+        default:
+          // TODO: 实现mmap的vma更新 
+          break;
+      }
       // 返回原位继续执行
       return ;
     }
