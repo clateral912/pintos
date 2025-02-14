@@ -1,23 +1,26 @@
 #include "page.h"
 #include "frame.h"
-#include "hash.h"
-#include "../threads/thread.h"
+#include <hash.h>
 #include "../threads/malloc.h"
 #include "../threads/synch.h"
 #include "../userprog/pagedir.h"
+#include "virtual-memory.h"
 #include <stdint.h>
 #include <stdio.h>
+
 
 struct hash process_list;
 struct lock process_list_lock;
 
-unsigned page_process_hash_hash(const struct hash_elem *elem, void *aux UNUSED)
+static unsigned 
+page_process_hash_hash(const struct hash_elem *elem, void *aux UNUSED)
 {
   struct process_node *node = hash_entry(elem, struct process_node, helem);
   return hash_bytes(&node->pid, sizeof(pid_t));
 }
 
-bool page_process_hash_less(const struct hash_elem *e1, const struct hash_elem *e2, void *aux UNUSED)
+static bool 
+page_process_hash_less(const struct hash_elem *e1, const struct hash_elem *e2, void *aux UNUSED)
 {
   struct process_node *node1 = hash_entry(e1, struct process_node, helem);
   struct process_node *node2 = hash_entry(e2, struct process_node, helem);
@@ -25,27 +28,31 @@ bool page_process_hash_less(const struct hash_elem *e1, const struct hash_elem *
   return (node1->pid < node2->pid ? true : false);
 }
 
-unsigned page_hash_hash(const struct hash_elem *elem, void *aux UNUSED)
+static unsigned 
+page_hash_hash(const struct hash_elem *elem, void *aux UNUSED)
 {
   struct page_node *node = hash_entry(elem, struct page_node, helem);
-  return hash_bytes(&node->pte, sizeof(uint32_t));
+  return hash_bytes(&node->upage, sizeof(uintptr_t));
 }
 
-bool page_hash_less(const struct hash_elem *e1, const struct hash_elem *e2, void *aux UNUSED)
+static bool 
+page_hash_less(const struct hash_elem *e1, const struct hash_elem *e2, void *aux UNUSED)
 {
   struct page_node *node1 = hash_entry(e1, struct page_node, helem);
   struct page_node *node2 = hash_entry(e2, struct page_node, helem);
 
-  return (node1->pte < node2->pte ? true : false);
+  return (node1->upage < node2->upage ? true : false);
 }
 
-void page_init()
+void 
+page_init()
 {
   hash_init(&process_list, page_process_hash_hash, page_process_hash_less, NULL); 
   lock_init(&process_list_lock);
 }
 
-void page_process_init(struct thread *t)
+void 
+page_process_init(struct thread *t)
 {
   struct process_node *process_node;
   process_node = malloc(sizeof(struct process_node));
@@ -62,25 +69,32 @@ void page_process_init(struct thread *t)
   lock_release(&process_list_lock);
 }
 
-bool page_add_page(struct thread *t, uint32_t pte, bool sharing, enum location loc)
+// 根据uaddr创建一个Supplemental Page Table对象(Page Node)
+// 完成初始化并将其加入对应进程持有的页面目录中
+// 返回一个Page Node对象
+struct page_node *
+page_add_page(struct thread *t, const void *uaddr, bool sharing, enum location loc)
 {
   //保证添加的pte一定对应一个已经存在的页
-  void *upage = pte_get_page(pte);
-  ASSERT(lookup_page(t->pagedir, upage, false) != NULL);
+  ASSERT(lookup_page(t->pagedir, uaddr, false) != NULL);
 
-  bool success;
+  //准备用来查找的key结构体
   struct process_node key_process_node;
   struct process_node *process_node;
   struct page_node *node;
+  //为Page Node分配内存
   node = malloc(sizeof(struct page_node));
   if (node == NULL)
     PANIC("Cannot allocate memory to store a page in SPT!\n");
 
+  //初始化Page Node
   node->owner = t->tid;
-  node->pte = pte;
+  node->upage = pg_round_down(uaddr);
   node->sharing = sharing;
   node->loc = loc;
+  node->frame_node = NULL;
 
+  //利用key结构体查找对应的process_node
   key_process_node.pid = t->tid;
 
   struct hash_elem *helem = hash_find(&process_list, &key_process_node.helem);
@@ -91,10 +105,101 @@ bool page_add_page(struct thread *t, uint32_t pte, bool sharing, enum location l
   }
 
   process_node = hash_entry(helem, struct process_node, helem); 
+  
+  //保证每个进程获取的内存页面不超过1024页(4GiB)
+  ASSERT(process_node->page_list.elem_cnt <= 1024);
+  //在Process Node的hashmap中插入Page Node
+  bool success = (hash_insert(&process_node->page_list, &node->helem) == NULL) ? true : false;
+  
+  if (!success)
+    return NULL;
 
-  success = (hash_insert(&process_node->page_list, &node->helem) == NULL) ? true : false;
-
-  return success;
+  return node;
 }
 
+// 在SPT中寻找uaddr对应的页面对象(Page Node)
+struct page_node *
+page_seek(struct thread *t, const void *uaddr)
+{
+  struct process_node key_process;
+  struct page_node    key_page;
+  
+  struct process_node *process;
+  struct page_node    *page;
 
+  key_process.pid = t->tid;
+  key_page.upage = pg_round_down(uaddr);
+
+  struct hash_elem *process_helem = hash_find(&process_list, &key_process.helem);
+  if (process_helem == NULL)
+    return NULL;
+
+  process = hash_entry(process_helem, struct process_node, helem); 
+  
+  struct hash_elem *page_helem = hash_find(&process->page_list, &key_page.helem);
+  if (page_helem == NULL)
+    return NULL;
+
+  page = hash_entry(page_helem, struct page_node, helem);
+
+  return page;
+}
+
+//用于销毁进程持有的Pagelist的辅助函数
+//用于释放物理页帧frame, 并释放Page Node的硬件资源(free(node))
+static void
+page_pagelist_destructor(struct hash_elem *helem, void *aux)
+{
+  struct thread *t = aux;
+  struct page_node *node = hash_entry(helem, struct page_node, helem);
+  if(node->loc == LOC_MEMORY)
+    frame_destroy_frame(node->frame_node);
+  pagedir_clear_page(t->pagedir, node->upage);
+  free(node);
+}
+
+//完全销毁一个进程持有的Page List, 释放其所有持有的页面
+//释放所有页面对应的内存
+//TODO: 当前未实现清除swap中的内容!!!!!!!
+void 
+page_destroy_pagelist(struct thread *t)
+{
+  struct process_node *process; 
+  struct process_node key_process;
+  key_process.pid = t->tid;
+
+  //寻找对应的process
+  struct hash_elem *process_helem = hash_find(&process_list, &key_process.helem);
+  if (process_helem == NULL)
+  {
+    printf("page_destroy_pagelist(): Cannot find process whose name is %s, pid is %d\n", t->name, t->tid);
+    return ;
+  }
+
+  process = hash_entry(process_helem, struct process_node, helem); 
+  //摧毁前传入辅助参数: 线程句柄
+  process->page_list.aux = t;
+
+  //摧毁该进程持有的pagelist
+  hash_destroy(&process->page_list, page_pagelist_destructor);
+
+  // 在process_list中删除该process
+  lock_acquire(&process_list_lock);
+  hash_delete(&process_list, &process->helem);
+  lock_release(&process_list_lock);
+}
+
+// 在page和frame之间建立链接, 把空闲的frame分配给一个Page node
+void
+page_assign_frame(struct page_node *pnode, struct frame_node *fnode)
+{
+  ASSERT(pnode->loc != LOC_MEMORY);
+  ASSERT(pnode->frame_node == NULL)
+  ASSERT(fnode->page_node == NULL);
+  ASSERT(fnode->kaddr != NULL);
+
+  pnode->frame_node = fnode;
+  fnode->page_node  = pnode;
+
+  pnode->loc = LOC_MEMORY;
+}
