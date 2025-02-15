@@ -164,20 +164,13 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
   from_user_vm = is_user_vaddr(fault_addr);
 
-  enum role role = SEG_UNUSED;
-
-  if (fault_addr == cur->vma.code_seg_end && cur->vma.loading_exe)
-    role = SEG_CODE;
-  else if (page_check_role(cur, fault_addr) == SEG_STACK)
-    role = SEG_STACK;
-  else if (page_check_role(cur, fault_addr) == SEG_MMAP)
-    role = SEG_MMAP;
-  else
-    syscall_exit(f, -1);   
-  
   // 用户空间发生的错误且addr指向了内核空间: 一定是不合法的访问! 杀死进程
   if (!from_user_vm && user)
     syscall_exit(f, -1);
+
+  enum role role = page_check_role(cur, fault_addr);
+  if (role == SEG_UNUSED)
+    syscall_exit(f, -1);   
 
   // 如果尝试向未分配的栈区域中读取数据, 必然是错误的!
   // 能进入page fault handler就说明其访问了未分配的区域

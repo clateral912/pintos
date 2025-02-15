@@ -249,6 +249,8 @@ page_get_page(struct thread *t, const void *uaddr, uint32_t flags, enum role rol
     if(mnode == NULL)
       PANIC("Cannot find mmap mapping accroding to uaddr!\n");
 
+    // IMPORTANT: 必须记录并恢复old_pos!
+    size_t old_pos = file_tell(mnode->file);
     size_t filesize = mnode->mmap_seg_end - mnode->mmap_seg_begin;
     // 只读取一页的内容
     // 准备读取文件, 移动文件指针到pos位置
@@ -260,6 +262,10 @@ page_get_page(struct thread *t, const void *uaddr, uint32_t flags, enum role rol
       page_free_page(t, uaddr);
       PANIC("page_get_page(): read bytes for mmap file failed!\n");
     }
+    // 清除dirty与accessed位, 避免后续误判
+    pagedir_set_accessed(t->pagedir, uaddr, false);
+    pagedir_set_dirty(t->pagedir, uaddr, false); 
+    file_seek(mnode->file, old_pos);
   }
 
 
@@ -327,8 +333,13 @@ page_check_role(struct thread *t, const void *uaddr)
   if (uaddr >= t->vma.code_seg_begin && uaddr < t->vma.code_seg_end)
     return SEG_CODE;
 
+  //如果uaddr恰好位于code段的最高位并且当前正在读取exe文件
+  //说明访问是合法的, 且uaddr应该是code段的地址
+  if (uaddr == t->vma.code_seg_end && t->vma.loading_exe)
+    return SEG_CODE;
+
   // 栈空间最大不超过8Mib (0x00800000 bytes)
-  // 任何试图在0xbf800000 到 PHYS_BASE之间的uaddr都会被视为正常的栈增长
+  // 任何试图在0xbf800000到PHYS_BASE之间的uaddr都会被视为正常的栈增长
   if (uaddr >= (void *)0xbf800000 && uaddr < t->vma.stack_seg_end)
     return SEG_STACK;
   
@@ -383,6 +394,9 @@ page_mmap_writeback(struct thread *t, mapid_t mapid)
   void *addr      = mnode->mmap_seg_begin;
   void *end       = mnode->mmap_seg_end; 
   size_t filesize = end - addr;
+  size_t old_pos  = mnode->file->pos;
+  // IMPORTANT: 这里必须记录并恢复文件原来的pos!!!
+  // 否则在写回后, 很可能会读取到错误的数据!!
 
   while(addr < end)
   {
@@ -400,6 +414,8 @@ page_mmap_writeback(struct thread *t, mapid_t mapid)
 
     addr = (uint8_t *)(addr) + PGSIZE;
   }
+  file_seek(mnode->file, old_pos);
+
 }
 
 mapid_t
@@ -463,9 +479,12 @@ page_mmap_unmap_all(struct thread *t)
   struct list_elem *e;
   struct mmap_vma_node *mnode;
 
-  for (e = list_begin(mmap_list); e != list_end(mmap_list); e = list_next(e))
+  for (e = list_begin(mmap_list); e != list_end(mmap_list);)
   {
     mnode = list_entry(e, struct mmap_vma_node, elem);
+    // IMPORTANT: 必须在unmap前获取下一个节点!!
+    // unmap后节点被销毁, list_next()得到的是无效节点!!
+    e = list_next(e);
     page_mmap_unmap(t, mnode->mapid);
   }
 }
