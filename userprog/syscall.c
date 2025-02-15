@@ -168,14 +168,28 @@ syscall_open(struct intr_frame *f)
 static void
 syscall_close(struct intr_frame *f)
 {
+  struct thread *cur = thread_current();
   int fd = *(get_args(f));
-  struct file *file = process_from_fd_get_file(thread_current(), fd);
-  
-  if (file == NULL)
+  if (fd == 1 || fd == 0)
     return ;
 
+  struct file *file = process_from_fd_get_file(cur, fd);
+  
+  if (file == NULL) 
+    return ;
+
+  struct fd_node *fnode = process_get_fd_node(cur, fd);
+  ASSERT(fnode != NULL);
+
+  if(fnode->mapid != UNMAPPED)
+  {
+    struct mmap_vma_node *mnode = page_mmap_seek(cur, fnode->mapid, USE_MAPID);
+    ASSERT(mnode != NULL);
+    mnode->file = file_reopen(file);
+  }
+
   file_close(file); 
-  process_remove_fd_node(thread_current(), fd);
+  process_remove_fd_node(cur, fd);
 }
 
 static void
@@ -190,6 +204,10 @@ syscall_read(struct intr_frame *f)
   
   if (!is_user_vaddr(buffer) || buffer == NULL)
     syscall_exit(f, FORCE_EXIT);
+
+  //读取stdout是不可行的!
+  if (fd == 1)
+    return ;
 
   if (fd == 0)
   {
@@ -289,6 +307,10 @@ syscall_write(struct intr_frame *f)
   void *buffer = (void *)args->arg1;
   size_t size = args->arg2;
 
+  // 向stdin中写入是不可行的!
+  if (fd == 0)
+    return ;
+
   // 仅对printf做初步的支持
   if (fd == 1)
   {
@@ -312,7 +334,6 @@ syscall_mmap(struct intr_frame *f)
   struct syscall_frame_2args *args = (struct syscall_frame_2args *)(args_ptr);
 
   int fd = args->arg0;
-  void *uaddr = (void *)args->arg1;
   
   if (fd == 0 || fd == 1)
   {
@@ -322,7 +343,17 @@ syscall_mmap(struct intr_frame *f)
   struct thread *cur = thread_current();
 
   struct file *file = process_from_fd_get_file(cur, fd);
-  mapid_t mapid = page_mmap_map(thread_current(), file, uaddr);
+  void *uaddr = (void *)args->arg1;
+  if (file == NULL)
+  {
+    retval(f, ERROR);
+    return ;
+  }
+  
+  mapid_t mapid = page_mmap_map(thread_current(), fd, file, uaddr);
+  if (mapid != -1)
+   process_fd_set_mapped(cur, fd, mapid);
+
   retval(f, mapid); 
 }
 
@@ -330,7 +361,15 @@ void
 syscall_munmap(struct intr_frame *f)
 {
   uint32_t mapid = *(get_args(f));
-  
+  struct thread *cur = thread_current();
+  // 以下几行在清除fd_node中的mapid 
+  // 这样在用户close文件的时候就不会reopen file了
+  struct mmap_vma_node *mnode = page_mmap_seek(cur, mapid, USE_MAPID);  
+  struct fd_node *fnode = process_get_fd_node(cur,mnode->fd);
+  // 若fnode == NULL 说明用户在unmap前就手动close了文件 无需操作
+  if (fnode != NULL)
+    fnode->mapid = UNMAPPED;
+
   page_mmap_unmap(thread_current(), mapid);
 }
 

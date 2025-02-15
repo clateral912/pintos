@@ -127,7 +127,7 @@ process_create_fd_node(struct thread *t, struct file *file)
 
   node->fd = process_allocate_fd(t);
   node->file = file;
-  node->mapped = false;
+  node->mapid = UNMAPPED;
 
   list_push_back(&t->fd_list, &node->elem);
   return node->fd;
@@ -152,18 +152,45 @@ process_remove_fd_node(struct thread *t, uint32_t fd)
   return false;
 }
 
-struct file *
-process_from_fd_get_file(struct thread *t, uint32_t fd)
+struct fd_node *
+process_get_fd_node(struct thread *t, uint32_t fd)
 {
+  ASSERT(fd != 0 && fd != 1);
+  
   struct list_elem *e;
   struct fd_node *node;
   for (e = list_begin(&t->fd_list); e != list_end(&t->fd_list); e = list_next(e))
   {
     node = list_entry(e, struct fd_node, elem);
     if (node->fd == fd)
-      return node->file;
+      return node;
   }
   return NULL;
+}
+
+struct file *
+process_from_fd_get_file(struct thread *t, uint32_t fd)
+{
+  struct fd_node *node = process_get_fd_node(t, fd);
+  if (node == NULL)
+    return NULL;
+
+  return node->file;
+}
+
+void
+process_fd_set_mapped(struct thread *t, uint32_t fd, mapid_t mapid)
+{
+  ASSERT(mapid != -1);
+
+  struct fd_node *node = process_get_fd_node(t, fd);
+  if (node != NULL)
+  {
+    node->mapid = mapid;
+    return ;
+  }
+
+  PANIC("fd_set_mapped(): Cannot find fd: %d\n", fd);
 }
 
 
@@ -308,6 +335,7 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  page_mmap_unmap_all(cur);
   page_destroy_pagelist(cur);
   process_destroy_fd_list(cur);
   // 恢复当前进程可执行文件的可修改性
@@ -633,8 +661,10 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   struct thread *cur = thread_current();
   file_seek (file, ofs);
 
-  cur->vma.code_seg_begin   = upage;
-  cur->vma.code_seg_end     = upage;
+  if ((void *)upage < cur->vma.code_seg_begin || cur->vma.code_seg_begin == NULL)
+    cur->vma.code_seg_begin   = upage;
+
+  cur->vma.code_seg_end = upage;
   cur->vma.loading_exe      = true;
   cur->page_default_flags   = FRM_ZERO | FRM_NO_EVICT | FRM_RW;
   //cur->page_default_flags  |= writable ? FRM_RW : FRM_RO;

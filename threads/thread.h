@@ -45,13 +45,14 @@ struct pwait_node_
 struct fd_node
 {
   uint32_t fd;
-  uint32_t mapped;
+  int32_t mapid;
   struct file *file;
   struct list_elem elem;
 };
 
 struct mmap_vma_node
 {
+  uint32_t fd;
   struct file *file;
   int32_t mapid;
   void *mmap_seg_begin;

@@ -9,16 +9,13 @@
 #include <list.h>
 #include "stdbool.h"
 #include "virtual-memory.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-
-#define USE_ADDR -1
-#define USE_MAPID 0x0
 
 struct hash process_list;
 struct lock process_list_lock;
 
-static struct mmap_vma_node *page_mmap_seek(struct thread *t, mapid_t mapid, const void *addr);
 void page_free_multiple(struct thread *t, const void *begin, const void *end);
 
 static unsigned 
@@ -143,12 +140,12 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
     PANIC("Cannot allocate memory to store a page in SPT!\n");
 
   //初始化Page Node
-  node->owner = t->tid;
-  node->upage = pg_round_down(uaddr);
-  node->sharing = flags & PG_SHARING;
-  node->loc = loc;
-  node->frame_node = NULL;
-  node->role = role;
+  node->owner       = t->tid;
+  node->upage       = pg_round_down(uaddr);
+  node->sharing     = flags & PG_SHARING;
+  node->loc         = loc;
+  node->frame_node  = NULL;
+  node->role        = role;
 
   process_node = find_process_node(t); 
   ASSERT(process_node != NULL);
@@ -270,11 +267,13 @@ page_get_page(struct thread *t, const void *uaddr, uint32_t flags, enum role rol
 }
 
 // 释放页面
+// 如果在所有页面列表中找不到page, 那么直接忽略, 不会有后续清除的行为
 void
 page_free_page(struct thread *t, const void *uaddr)
 {
   struct page_node *page_node = page_seek(t, uaddr);
-  ASSERT(page_node != NULL);
+  if (page_node == NULL)
+    return ;
 
   struct process_node *process_node = find_process_node(t);
   ASSERT(process_node != NULL);
@@ -300,7 +299,7 @@ page_free_multiple(struct thread *t, const void *begin, const void *end)
 }
 
 // 双模式查找, 可提供mapid或addr.
-static struct mmap_vma_node *
+struct mmap_vma_node *
 page_mmap_seek(struct thread *t, mapid_t mapid, const void *addr)
 {
   struct list *mmap_list = &t->vma.mmap_vma_list;
@@ -346,7 +345,10 @@ page_mmap_overlap(struct thread *t, void *addr, size_t filesize)
   void *begin = addr;
   void *end   = (uint8_t *)(addr) + filesize;
 
-  if (!(begin >= t->vma.code_seg_end && end <= t->vma.code_seg_begin))
+  if (!(begin >= t->vma.code_seg_end || end <= t->vma.code_seg_begin))
+    return false;
+
+  if (end >= (void *)0xbf800000)
     return false;
 
   struct list *mmap_list = &t->vma.mmap_vma_list;
@@ -369,8 +371,39 @@ page_allocate_mapid(struct thread *t)
   return (++t->vma.mapid);
 }
 
+void 
+page_mmap_writeback(struct thread *t, mapid_t mapid)
+{
+  struct mmap_vma_node *mnode = page_mmap_seek(t, mapid, USE_MAPID);
+  ASSERT(mnode != NULL);
+
+  struct file *file = mnode->file;
+  ASSERT(file != NULL);
+
+  void *addr      = mnode->mmap_seg_begin;
+  void *end       = mnode->mmap_seg_end; 
+  size_t filesize = end - addr;
+
+  while(addr < end)
+  {
+    // 只对写回有修改的页面
+    if (pagedir_is_accessed(t->pagedir, addr)
+        &&
+        pagedir_is_dirty(t->pagedir, addr))
+    {
+      size_t pos = addr - mnode->mmap_seg_begin;
+      uint32_t write_bytes = filesize - pos >= PGSIZE ? PGSIZE : filesize - pos;
+      file_seek(file, pos);
+      if (file_write(file, addr, write_bytes) != write_bytes)
+        PANIC("page_mmap_writeback(): Cannot write back to file!\n");
+    }
+
+    addr = (uint8_t *)(addr) + PGSIZE;
+  }
+}
+
 mapid_t
-page_mmap_map(struct thread *t, struct file *file, void *addr)
+page_mmap_map(struct thread *t, uint32_t fd, struct file *file, void *addr)
 {
   // fd是否为0和1的检查需要在syscall中做！
   if (pg_ofs(addr) != 0 || addr == NULL)
@@ -386,17 +419,23 @@ page_mmap_map(struct thread *t, struct file *file, void *addr)
 
   size_t filesize = file_length(file);
   if (filesize == 0)
+  {
+    free(node);
     return -1;
-
+  }
   if (page_mmap_overlap(t, addr, filesize))
   {
     node->mapid           = page_allocate_mapid(t);
     node->mmap_seg_begin  = addr;
     node->mmap_seg_end    = (uint8_t *)(addr) + filesize;
     node->file            = file;
+    node->fd              = fd;
   }
   else
+  {
+    free(node);
     return -1;
+  }
 
   list_push_back(&t->vma.mmap_vma_list, &node->elem);
 
@@ -410,8 +449,23 @@ page_mmap_unmap(struct thread *t, mapid_t mapid)
   if (mnode == NULL)
     return ;
 
+  page_mmap_writeback(t, mapid);
   page_free_multiple(t, mnode->mmap_seg_begin, mnode->mmap_seg_end); 
   list_remove(&mnode->elem);
-  file_close(mnode->file);
+  // file_close(mnode->file);
   free(mnode);
+}
+
+void
+page_mmap_unmap_all(struct thread *t)
+{
+  struct list *mmap_list = &t->vma.mmap_vma_list;
+  struct list_elem *e;
+  struct mmap_vma_node *mnode;
+
+  for (e = list_begin(mmap_list); e != list_end(mmap_list); e = list_next(e))
+  {
+    mnode = list_entry(e, struct mmap_vma_node, elem);
+    page_mmap_unmap(t, mnode->mapid);
+  }
 }

@@ -18,4 +18,7 @@ void process_destroy_fd_list(struct thread *);
 uint32_t process_create_fd_node(struct thread *, struct file *);
 bool process_remove_fd_node(struct thread *, uint32_t);
 struct file * process_from_fd_get_file(struct thread *, uint32_t);
+void process_fd_set_mapped(struct thread *t, uint32_t fd, int32_t mapid);
+struct fd_node *process_get_fd_node(struct thread *t, uint32_t fd);
+
 #endif /* userprog/process.h */

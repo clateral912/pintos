@@ -7,6 +7,10 @@
 #include "../threads/pte.h"
 #include <hash.h>
 
+#define UNMAPPED -1
+#define USE_ADDR -1
+#define USE_MAPID 0x0
+
 typedef int pid_t;
 typedef int mapid_t;
 

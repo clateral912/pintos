@@ -164,29 +164,25 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
   from_user_vm = is_user_vaddr(fault_addr);
 
-  // 用户空间发生的错误且addr指向了内核空间: 一定是不合法的访问! 杀死进程
-  if (!from_user_vm && user)
-    syscall_exit(f, -1);
-
-  // 用户进程尝试向不存在的内存区域读取数据, 一定是不合法的访问!杀死进程
-  // TODO: 当用户尝试读取不在内存中的文件时(mmap), 也会触发这个错误
-  // 需要重新修改逻辑! 不能一刀切直接exit!
-  if (not_present && !write && user)
-    syscall_exit(f, -1);
-
   enum role role = SEG_UNUSED;
-  //
-  // bool  esp_in_stack        = page_check_role(cur, f->esp) == SEG_STACK;
-  // bool  uaddr_match_growth  = fault_addr == ((void *)((uint8_t *)(f->esp) - 32));
-  //       uaddr_match_growth |= fault_addr == ((void *)((uint8_t *)(f->esp) - 4));
-  //
+
   if (fault_addr == cur->vma.code_seg_end && cur->vma.loading_exe)
     role = SEG_CODE;
   else if (page_check_role(cur, fault_addr) == SEG_STACK)
     role = SEG_STACK;
+  else if (page_check_role(cur, fault_addr) == SEG_MMAP)
+    role = SEG_MMAP;
   else
     syscall_exit(f, -1);   
+  
+  // 用户空间发生的错误且addr指向了内核空间: 一定是不合法的访问! 杀死进程
+  if (!from_user_vm && user)
+    syscall_exit(f, -1);
 
+  // 如果尝试向未分配的栈区域中读取数据, 必然是错误的!
+  // 能进入page fault handler就说明其访问了未分配的区域
+  if (role == SEG_STACK && !write)
+    syscall_exit(f, -1);
 
   if (from_user_vm)
   {
@@ -205,6 +201,10 @@ page_fault (struct intr_frame *f)
           break;
         case SEG_CODE:
           cur->vma.code_seg_end = (uint8_t *)(cur->vma.code_seg_end) + PGSIZE;
+          break;
+        case SEG_MMAP:
+          //do nothing
+          //因为mmap的VMA不需要更新
           break;
         case SEG_UNUSED:
           NOT_REACHED();
