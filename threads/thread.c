@@ -155,6 +155,7 @@ thread_vma_init(struct thread *t)
   t->vma.code_seg_end     = NULL;
   t->vma.stack_seg_begin  = NULL;
   t->vma.stack_seg_end    = NULL;
+  t->vma.mapid            = 0;
 
   list_init(&t->vma.mmap_vma_list);
 }

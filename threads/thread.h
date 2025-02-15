@@ -20,7 +20,7 @@ enum thread_status
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
-typedef int tid_t;
+typedef unsigned int tid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
 
 /* Thread priorities. */
@@ -45,13 +45,15 @@ struct pwait_node_
 struct fd_node
 {
   uint32_t fd;
+  uint32_t mapped;
   struct file *file;
   struct list_elem elem;
 };
 
 struct mmap_vma_node
 {
-  uint32_t fd;
+  struct file *file;
+  int32_t mapid;
   void *mmap_seg_begin;
   void *mmap_seg_end;
   struct list_elem elem;
@@ -60,7 +62,7 @@ struct mmap_vma_node
 struct vma 
 {
   bool loading_exe;
-
+  uint8_t mapid;
   void *code_seg_begin;
   void *code_seg_end;
 

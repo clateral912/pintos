@@ -39,7 +39,6 @@ process_push_arguments(uint8_t *esp, char* args)
   char *token, *save_ptr;
   char *argv[MAX_CMDLINE_TOKENS];         // 存储指向arg中各个token的指针 
   int argc = 0;
-  int size = 0;
   
   // 初始化argv
   for (int i = 0; i < MAX_CMDLINE_TOKENS; i++)
@@ -97,7 +96,7 @@ process_push_arguments(uint8_t *esp, char* args)
   return (void *)esp;
 }
 
-static uint32_t inline
+inline static uint32_t
 process_allocate_fd(struct thread *t)
 {
   return (++t->current_fd);
@@ -128,6 +127,7 @@ process_create_fd_node(struct thread *t, struct file *file)
 
   node->fd = process_allocate_fd(t);
   node->file = file;
+  node->mapped = false;
 
   list_push_back(&t->fd_list, &node->elem);
   return node->fd;
@@ -308,6 +308,7 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  page_destroy_pagelist(cur);
   process_destroy_fd_list(cur);
   // 恢复当前进程可执行文件的可修改性
   if (cur->exec_file != NULL)
@@ -632,10 +633,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   struct thread *cur = thread_current();
   file_seek (file, ofs);
 
-  cur->vma.code_seg_begin = upage;
-  cur->vma.code_seg_end   = upage;
-  cur->vma.loading_exe    = true;
-  cur->page_default_flags = FRM_ZERO | FRM_RW | FRM_NO_EVICT;
+  cur->vma.code_seg_begin   = upage;
+  cur->vma.code_seg_end     = upage;
+  cur->vma.loading_exe      = true;
+  cur->page_default_flags   = FRM_ZERO | FRM_NO_EVICT | FRM_RW;
+  //cur->page_default_flags  |= writable ? FRM_RW : FRM_RO;
+  //如果此处设置了read_only , 会造成后续无法写入文件!
+  //TODO: 实现read_only的功能
 
   while (read_bytes > 0 || zero_bytes > 0) 
     {

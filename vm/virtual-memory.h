@@ -8,6 +8,7 @@
 #include <hash.h>
 
 typedef int pid_t;
+typedef int mapid_t;
 
 enum location{
   LOC_MEMORY,
@@ -20,7 +21,7 @@ enum role{
   SEG_STACK,
   SEG_CODE,
   SEG_MMAP,
-  SEG_INVALID
+  SEG_UNUSED
 };
 
 //  以下所有数据结构都定义在内核虚拟内存中, 保证全局可见性

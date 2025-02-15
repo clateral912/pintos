@@ -174,7 +174,7 @@ page_fault (struct intr_frame *f)
   if (not_present && !write && user)
     syscall_exit(f, -1);
 
-  enum role role = SEG_INVALID;
+  enum role role = SEG_UNUSED;
   //
   // bool  esp_in_stack        = page_check_role(cur, f->esp) == SEG_STACK;
   // bool  uaddr_match_growth  = fault_addr == ((void *)((uint8_t *)(f->esp) - 32));
@@ -206,7 +206,7 @@ page_fault (struct intr_frame *f)
         case SEG_CODE:
           cur->vma.code_seg_end = (uint8_t *)(cur->vma.code_seg_end) + PGSIZE;
           break;
-        case SEG_INVALID:
+        case SEG_UNUSED:
           NOT_REACHED();
           break;
         default:

@@ -14,5 +14,7 @@ void page_assign_frame(struct page_node *, struct frame_node *);
 bool page_get_page(struct thread *t, const void *uaddr, uint32_t flags, enum role role);
 void page_free_page(struct thread *t, const void *uaddr);
 enum role page_check_role(struct thread *t, const void *uaddr);
+mapid_t page_mmap_map(struct thread *t, struct file *file, void *addr);
+void page_mmap_unmap(struct thread *t, mapid_t mapid);
 
 #endif // !VM_PAGE_H

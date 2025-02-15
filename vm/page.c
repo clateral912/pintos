@@ -2,6 +2,8 @@
 #include "frame.h"
 #include <hash.h>
 #include "../threads/malloc.h"
+#include "../filesys/file.h"
+#include "../filesys/filesys.h"
 #include "../threads/synch.h"
 #include "../userprog/pagedir.h"
 #include <list.h>
@@ -10,9 +12,14 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define USE_ADDR -1
+#define USE_MAPID 0x0
 
 struct hash process_list;
 struct lock process_list_lock;
+
+static struct mmap_vma_node *page_mmap_seek(struct thread *t, mapid_t mapid, const void *addr);
+void page_free_multiple(struct thread *t, const void *begin, const void *end);
 
 static unsigned 
 page_process_hash_hash(const struct hash_elem *elem, void *aux UNUSED)
@@ -122,13 +129,12 @@ page_process_init(struct thread *t)
 struct page_node *
 page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location loc, enum role role)
 {
-  ASSERT(role != SEG_INVALID);
+  ASSERT(role != SEG_UNUSED);
   //保证添加的pte一定对应一个已经存在的页
   if (loc == LOC_MEMORY)
     ASSERT(lookup_page(t->pagedir, uaddr, false) != NULL);
 
   //准备用来查找的key结构体
-  struct process_node key_process_node;
   struct process_node *process_node;
   struct page_node *node;
   //为Page Node分配内存
@@ -142,6 +148,7 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
   node->sharing = flags & PG_SHARING;
   node->loc = loc;
   node->frame_node = NULL;
+  node->role = role;
 
   process_node = find_process_node(t); 
   ASSERT(process_node != NULL);
@@ -226,12 +233,39 @@ page_assign_frame(struct page_node *pnode, struct frame_node *fnode)
 bool
 page_get_page(struct thread *t, const void *uaddr, uint32_t flags, enum role role)
 {
+  // 若文件长度不是PGSIZE的整数倍, 你需要在最末尾的页面, 且不是文件的部分上填充0
+  if (role == SEG_MMAP)
+    flags |= FRM_ZERO;
+
   struct frame_node *fnode = frame_allocate_page(t->pagedir, uaddr, flags);
   struct page_node  *pnode = page_add_page(t, uaddr, flags, LOC_NOT_PRESENT, role);
   if (fnode == NULL)
     return false;
 
   page_assign_frame(pnode, fnode);
+  if (role == SEG_MMAP)
+  {
+    // 必须整页读取文件
+    uaddr = pg_round_down(uaddr);
+    //  找到对应的文件node
+    struct mmap_vma_node *mnode = page_mmap_seek(t, USE_ADDR, uaddr);     
+    if(mnode == NULL)
+      PANIC("Cannot find mmap mapping accroding to uaddr!\n");
+
+    size_t filesize = mnode->mmap_seg_end - mnode->mmap_seg_begin;
+    // 只读取一页的内容
+    // 准备读取文件, 移动文件指针到pos位置
+    size_t pos = uaddr - mnode->mmap_seg_begin;
+    uint32_t read_bytes = filesize - pos >= PGSIZE ? PGSIZE : filesize - pos;
+    file_seek(mnode->file, pos);
+    if (file_read(mnode->file, (void *)uaddr, read_bytes) != read_bytes)
+    {
+      page_free_page(t, uaddr);
+      PANIC("page_get_page(): read bytes for mmap file failed!\n");
+    }
+  }
+
+
   return true;
 }
 
@@ -251,21 +285,69 @@ page_free_page(struct thread *t, const void *uaddr)
   page_page_destructor(&page_node->helem, (void *)t);
 }
 
+//释放一整段内存上的page
+void
+page_free_multiple(struct thread *t, const void *begin, const void *end)
+{
+  ASSERT(begin < end);
+  begin = pg_round_down(begin);
+
+  while(begin < end)
+  {
+    page_free_page(t, begin);
+    begin = ((uint8_t *)begin) + PGSIZE;
+  }
+}
+
+// 双模式查找, 可提供mapid或addr.
+static struct mmap_vma_node *
+page_mmap_seek(struct thread *t, mapid_t mapid, const void *addr)
+{
+  struct list *mmap_list = &t->vma.mmap_vma_list;
+  struct list_elem *e;
+  struct mmap_vma_node *mnode;
+
+  for (e = list_begin(mmap_list); e != list_end(mmap_list); e = list_next(e))
+  {
+    mnode = list_entry(e, struct mmap_vma_node, elem);
+    if (mnode->mapid == mapid)
+      return mnode;
+    if (addr >= mnode->mmap_seg_begin && addr < mnode->mmap_seg_end)
+      return mnode;
+  }
+  
+  return NULL;
+}
+
 //检查传入的uaddr在数据段中的合法性, 返回其位于哪个数据段(role)
-//若uaddr不合法, 返回SEG_INVALID
+//若uaddr不合法, 返回SEG_UNUSED
 enum role
 page_check_role(struct thread *t, const void *uaddr)
 {
-  void *esp = t->vma.stack_seg_end;
-
   // 注意! 地址不包含end!
-  // 栈空间最大不超过8Mib (0x00800000 bytes)
-  // 任何试图在0xbf800000 到 PHYS_BASE之间的uaddr都会被视为正常的栈增长
   if (uaddr >= t->vma.code_seg_begin && uaddr < t->vma.code_seg_end)
     return SEG_CODE;
 
+  // 栈空间最大不超过8Mib (0x00800000 bytes)
+  // 任何试图在0xbf800000 到 PHYS_BASE之间的uaddr都会被视为正常的栈增长
   if (uaddr >= (void *)0xbf800000 && uaddr < t->vma.stack_seg_end)
     return SEG_STACK;
+  
+  if (page_mmap_seek(t, USE_ADDR, uaddr) != NULL)
+    return SEG_MMAP;
+
+  return SEG_UNUSED;
+}
+
+// 监测需要mmap的内存区域与其他内存区域是否有重叠
+static bool
+page_mmap_overlap(struct thread *t, void *addr, size_t filesize)
+{
+  void *begin = addr;
+  void *end   = (uint8_t *)(addr) + filesize;
+
+  if (!(begin >= t->vma.code_seg_end && end <= t->vma.code_seg_begin))
+    return false;
 
   struct list *mmap_list = &t->vma.mmap_vma_list;
   struct list_elem *e;
@@ -274,9 +356,62 @@ page_check_role(struct thread *t, const void *uaddr)
   for (e = list_begin(mmap_list); e != list_end(mmap_list); e = list_next(e))
   {
     mnode = list_entry(e, struct mmap_vma_node, elem);
-    if (uaddr >= mnode->mmap_seg_begin && uaddr <= mnode->mmap_seg_end)
-      return SEG_MMAP;
+    if (!(begin >= mnode->mmap_seg_end || end <= mnode->mmap_seg_begin))
+      return false;
   }
 
-  return SEG_INVALID;
+  return true;
+}
+
+inline static mapid_t
+page_allocate_mapid(struct thread *t)
+{
+  return (++t->vma.mapid);
+}
+
+mapid_t
+page_mmap_map(struct thread *t, struct file *file, void *addr)
+{
+  // fd是否为0和1的检查需要在syscall中做！
+  if (pg_ofs(addr) != 0 || addr == NULL)
+    return -1;
+
+  struct mmap_vma_node *node;
+  node = malloc(sizeof(struct mmap_vma_node));
+  if (node == NULL)
+  {
+    printf("page_mmap_create(): Cannot allocate memory for mmap_vma_node!\n");
+    return -1;
+  }
+
+  size_t filesize = file_length(file);
+  if (filesize == 0)
+    return -1;
+
+  if (page_mmap_overlap(t, addr, filesize))
+  {
+    node->mapid           = page_allocate_mapid(t);
+    node->mmap_seg_begin  = addr;
+    node->mmap_seg_end    = (uint8_t *)(addr) + filesize;
+    node->file            = file;
+  }
+  else
+    return -1;
+
+  list_push_back(&t->vma.mmap_vma_list, &node->elem);
+
+  return node->mapid;
+}
+
+void
+page_mmap_unmap(struct thread *t, mapid_t mapid)
+{
+  struct mmap_vma_node *mnode = page_mmap_seek(t, mapid, USE_MAPID);
+  if (mnode == NULL)
+    return ;
+
+  page_free_multiple(t, mnode->mmap_seg_begin, mnode->mmap_seg_end); 
+  list_remove(&mnode->elem);
+  file_close(mnode->file);
+  free(mnode);
 }
