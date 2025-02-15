@@ -122,6 +122,7 @@ page_process_init(struct thread *t)
 struct page_node *
 page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location loc, enum role role)
 {
+  ASSERT(role != SEG_INVALID);
   //保证添加的pte一定对应一个已经存在的页
   if (loc == LOC_MEMORY)
     ASSERT(lookup_page(t->pagedir, uaddr, false) != NULL);
@@ -258,13 +259,12 @@ page_check_role(struct thread *t, const void *uaddr)
   void *esp = t->vma.stack_seg_end;
 
   // 注意! 地址不包含end!
+  // 栈空间最大不超过8Mib (0x00800000 bytes)
+  // 任何试图在0xbf800000 到 PHYS_BASE之间的uaddr都会被视为正常的栈增长
   if (uaddr >= t->vma.code_seg_begin && uaddr < t->vma.code_seg_end)
     return SEG_CODE;
 
-  if (uaddr >= t->vma.stack_seg_begin && uaddr <= t->vma.stack_seg_end)
-    return SEG_STACK;
-
-  if (uaddr == ((uint8_t *)(esp) + 4) || uaddr == ((uint8_t *)(esp) + 32))
+  if (uaddr >= (void *)0xbf800000 && uaddr < t->vma.stack_seg_end)
     return SEG_STACK;
 
   struct list *mmap_list = &t->vma.mmap_vma_list;

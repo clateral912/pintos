@@ -150,6 +150,7 @@ thread_start (void)
 static void
 thread_vma_init(struct thread *t)
 {
+  t->vma.loading_exe      = false;
   t->vma.code_seg_begin   = NULL;
   t->vma.code_seg_end     = NULL;
   t->vma.stack_seg_begin  = NULL;

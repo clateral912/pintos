@@ -634,11 +634,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
   cur->vma.code_seg_begin = upage;
   cur->vma.code_seg_end   = upage;
+  cur->vma.loading_exe    = true;
   cur->page_default_flags = FRM_ZERO | FRM_RW | FRM_NO_EVICT;
 
   while (read_bytes > 0 || zero_bytes > 0) 
     {
-      cur->vma.code_seg_end += 1;
       /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
          and zero the final PAGE_ZERO_BYTES bytes. */
@@ -658,7 +658,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       upage += PGSIZE;
     }
 
+  cur->vma.loading_exe    = false;
   cur->page_default_flags = 0;
+
 
   return true;
 }
@@ -674,7 +676,7 @@ setup_stack (void **esp)
   if (success)
   {
     cur->vma.stack_seg_end = PHYS_BASE;
-    cur->vma.stack_seg_begin = PHYS_BASE;
+    cur->vma.stack_seg_begin = ((uint8_t *)PHYS_BASE) - PGSIZE;
     *esp = PHYS_BASE;
   }
   else

@@ -59,6 +59,8 @@ struct mmap_vma_node
 
 struct vma 
 {
+  bool loading_exe;
+
   void *code_seg_begin;
   void *code_seg_end;
 

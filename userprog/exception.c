@@ -158,23 +158,10 @@ page_fault (struct intr_frame *f)
   intr_enable ();
 
   struct thread *cur = thread_current();
-  // 更新VMA中的栈空间结束处
-  // 如果是因为栈增长导致的Demand Paging, 那么esp指针
-  // 一定会落在可用内存范围内(位于VMA的stack段内)
-  // 此时更新stack段的begin
-  if (page_check_role(cur, fault_addr)  == SEG_INVALID)
-  {
-    if (page_check_role(cur, f->esp) == SEG_STACK && (fault_addr >= ((void *)((uint8_t *)(f->esp) - 32))))
-      cur->vma.stack_seg_begin = f->esp;
-    else
-      syscall_exit(f, -1);    //如果esp不再Stack Segment中, 那么进程一定错误地移动了栈指针
-                              //或者访问了不合法的数据段, 必须杀死进程!
-  }
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
-
   from_user_vm = is_user_vaddr(fault_addr);
 
   // 用户空间发生的错误且addr指向了内核空间: 一定是不合法的访问! 杀死进程
@@ -182,8 +169,24 @@ page_fault (struct intr_frame *f)
     syscall_exit(f, -1);
 
   // 用户进程尝试向不存在的内存区域读取数据, 一定是不合法的访问!杀死进程
+  // TODO: 当用户尝试读取不在内存中的文件时(mmap), 也会触发这个错误
+  // 需要重新修改逻辑! 不能一刀切直接exit!
   if (not_present && !write && user)
     syscall_exit(f, -1);
+
+  enum role role = SEG_INVALID;
+  //
+  // bool  esp_in_stack        = page_check_role(cur, f->esp) == SEG_STACK;
+  // bool  uaddr_match_growth  = fault_addr == ((void *)((uint8_t *)(f->esp) - 32));
+  //       uaddr_match_growth |= fault_addr == ((void *)((uint8_t *)(f->esp) - 4));
+  //
+  if (fault_addr == cur->vma.code_seg_end && cur->vma.loading_exe)
+    role = SEG_CODE;
+  else if (page_check_role(cur, fault_addr) == SEG_STACK)
+    role = SEG_STACK;
+  else
+    syscall_exit(f, -1);   
+
 
   if (from_user_vm)
   {
@@ -191,10 +194,6 @@ page_fault (struct intr_frame *f)
     // 如果没有在SPT里找到page:
     if (page == NULL)
     {
-      // 检验fault_addr的合法性
-      enum role role = page_check_role(cur, fault_addr);
-      if (role == SEG_INVALID)
-        syscall_exit(f, -1);
       // 分配页面
       page_get_page(cur, fault_addr, cur->page_default_flags, role);
       // 更新进程的VMA
