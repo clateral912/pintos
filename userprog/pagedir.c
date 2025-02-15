@@ -7,7 +7,6 @@
 #include "../threads/palloc.h"
 
 static uint32_t *active_pd (void);
-static void invalidate_pagedir (uint32_t *);
 
 // IMPORTANT: 每个进程的页目录和页表都存储在内核虚拟内存中!
 // 因此, 分配PTE, PDE, 创建或销毁Page Directory, 都是在内核虚拟地址空间
@@ -317,7 +316,7 @@ active_pd (void)
    This function invalidates the TLB if PD is the active page
    directory.  (If PD is not active then its entries are not in
    the TLB, so there is no need to invalidate anything.) */
-static void
+void
 invalidate_pagedir (uint32_t *pd) 
 {
   if (active_pd () == pd) 

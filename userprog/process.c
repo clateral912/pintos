@@ -630,26 +630,6 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
-// read_bytes + zero_bytes 可以为4096(PGSIZE)的倍数! 不一定是4096!
-      // /* Get a page of memory. */
-      // uint8_t *kpage = palloc_get_page (PAL_USER);
-      // if (kpage == NULL)
-      //   return false;
-      //
-      // /* Load this page. */
-      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-      //   {
-      //     palloc_free_page (kpage);
-      //     return false; 
-      //   }
-      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
-      //
-      // /* Add the page to the process's address space. */
-      // if (!install_page (upage, kpage, writable)) 
-      //   {
-      //     palloc_free_page (kpage);
-      //     return false; 
-      //   }
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
@@ -686,7 +666,14 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         }
       memset (upage + page_read_bytes, 0, page_zero_bytes);
 
-      /* Advance. */
+      // 读取后, 将需要只读的页面设置为只读
+      if (!writable)
+      {
+        uint32_t *pte = lookup_page(cur->pagedir, upage, false);
+        ASSERT(pte != NULL);
+        *pte &= ~(uint32_t)PTE_W;
+      }
+           /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
@@ -694,7 +681,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
   cur->vma.loading_exe    = false;
   cur->page_default_flags = 0;
-
+  //由于我们更改了某些页面的读写权限, 需要刷新TLB
+  invalidate_pagedir(cur->pagedir);
 
   return true;
 }

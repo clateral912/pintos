@@ -329,6 +329,7 @@ page_mmap_seek(struct thread *t, mapid_t mapid, const void *addr)
 enum role
 page_check_role(struct thread *t, const void *uaddr)
 {
+  void *esp = t->vma.stack_seg_begin;
   // 注意! 地址不包含end!
   if (uaddr >= t->vma.code_seg_begin && uaddr < t->vma.code_seg_end)
     return SEG_CODE;
@@ -339,8 +340,10 @@ page_check_role(struct thread *t, const void *uaddr)
     return SEG_CODE;
 
   // 栈空间最大不超过8Mib (0x00800000 bytes)
-  // 任何试图在0xbf800000到PHYS_BASE之间的uaddr都会被视为正常的栈增长
-  if (uaddr >= (void *)0xbf800000 && uaddr < t->vma.stack_seg_end)
+  if (uaddr >= t->vma.stack_seg_begin && uaddr < t->vma.stack_seg_end)
+    return SEG_STACK;
+
+  if (uaddr == esp - 4 || uaddr == esp - 32)
     return SEG_STACK;
   
   if (page_mmap_seek(t, USE_ADDR, uaddr) != NULL)
@@ -359,7 +362,7 @@ page_mmap_overlap(struct thread *t, void *addr, size_t filesize)
   if (!(begin >= t->vma.code_seg_end || end <= t->vma.code_seg_begin))
     return false;
 
-  if (end >= (void *)0xbf800000)
+  if (end >= t->vma.stack_seg_begin)
     return false;
 
   struct list *mmap_list = &t->vma.mmap_vma_list;

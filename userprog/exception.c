@@ -168,6 +168,7 @@ page_fault (struct intr_frame *f)
   if (!from_user_vm && user)
     syscall_exit(f, -1);
 
+  cur->vma.stack_seg_begin = f->esp;
   enum role role = page_check_role(cur, fault_addr);
   if (role == SEG_UNUSED)
     syscall_exit(f, -1);   
@@ -175,6 +176,11 @@ page_fault (struct intr_frame *f)
   // 如果尝试向未分配的栈区域中读取数据, 必然是错误的!
   // 能进入page fault handler就说明其访问了未分配的区域
   if (role == SEG_STACK && !write)
+    syscall_exit(f, -1);
+
+  //用户进程尝试向CODE段与DATA段中写入数据, 必然是错误的!
+  //注意, 我们要保证此时不在加载exe
+  if (role == SEG_CODE && write && !cur->vma.loading_exe)
     syscall_exit(f, -1);
 
   if (from_user_vm)
