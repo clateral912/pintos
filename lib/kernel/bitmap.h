@@ -7,6 +7,26 @@
 
 /* Bitmap abstract data type. */
 
+/* Element type.
+
+   This must be an unsigned integer type at least as wide as int.
+
+   Each bit represents one bit in the bitmap.
+   If bit 0 in an element represents bit K in the bitmap,
+   then bit 1 in the element represents bit K+1 in the bitmap,
+   and so on. */
+typedef unsigned long elem_type;
+// elem_type的长度为32位, 4个字节, 一个elem_type可以管理32页的page
+/* From the outside, a bitmap is an array of bits.  From the
+   inside, it's an array of elem_type (defined above) that
+   simulates an array of bits. */
+struct bitmap
+  {
+    // 这里的bit_cnt是我们用多少个bit来管理内存
+    // 即, 页面的总数
+    size_t bit_cnt;     /* Number of bits. */
+    elem_type *bits;    /* Elements that represent bits. */
+  };
 /* Creation and destruction. */
 struct bitmap *bitmap_create (size_t bit_cnt);
 struct bitmap *bitmap_create_in_buf (size_t bit_cnt, void *, size_t byte_cnt);
