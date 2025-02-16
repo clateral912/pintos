@@ -3,6 +3,7 @@
 
 #include "stdbool.h"
 #include "virtual-memory.h"
+#include "../threads/thread.h"
 #include <stdint.h>
 
 // flags = 0, 说明生成的页面RW, 不zero, 可驱逐, 不sharing
@@ -15,7 +16,8 @@
 extern struct list frame_list;
 
 void frame_init(void);
-struct frame_node *frame_allocate_page(uint32_t *pd, const void *uaddr, uint32_t flags);
+struct frame_node *frame_allocate_page(uint32_t *pd, uint32_t flags);
 void frame_destroy_frame(struct frame_node *fnode);
+struct frame_node *frame_evict(struct thread *t);
 
 #endif

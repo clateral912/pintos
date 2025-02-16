@@ -54,6 +54,7 @@ struct process_node
 struct page_node 
 {
   pid_t owner;                      //页面持有者: 某个用户进程
+  size_t swap_pg_idx;               //页面在swap磁盘上的序列号
   bool sharing;                     //是否支持shairng
   enum location loc;                //页面当前位置: 内存中/swap中/文件中/尚未存在
   enum role role;                   //页面的角色(存储的是哪种类型的数据)

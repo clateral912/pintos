@@ -8,6 +8,7 @@
 #include "../userprog/pagedir.h"
 #include <list.h>
 #include "stdbool.h"
+#include "swap.h"
 #include "virtual-memory.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -17,6 +18,7 @@ struct hash process_list;
 struct lock process_list_lock;
 
 void page_free_multiple(struct thread *t, const void *begin, const void *end);
+static void page_mmap_readin(struct thread *t, void *uaddr);
 
 static unsigned 
 page_process_hash_hash(const struct hash_elem *elem, void *aux UNUSED)
@@ -129,8 +131,9 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
   ASSERT(role != SEG_UNUSED);
   //保证添加的pte一定对应一个已经存在的页
   if (loc == LOC_MEMORY)
+  {
     ASSERT(lookup_page(t->pagedir, uaddr, false) != NULL);
-
+  }
   //准备用来查找的key结构体
   struct process_node *process_node;
   struct page_node *node;
@@ -141,11 +144,12 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
 
   //初始化Page Node
   node->owner       = t->tid;
-  node->upage       = pg_round_down(uaddr);
+  node->upage       = pg_round_down(uaddr);;
   node->sharing     = flags & PG_SHARING;
   node->loc         = loc;
   node->frame_node  = NULL;
   node->role        = role;
+  node->swap_pg_idx = SIZE_MAX;
 
   process_node = find_process_node(t); 
   ASSERT(process_node != NULL);
@@ -210,12 +214,25 @@ page_destroy_pagelist(struct thread *t)
 
 // 在page和frame之间建立链接, 把空闲的frame分配给一个Page node
 void
-page_assign_frame(struct page_node *pnode, struct frame_node *fnode)
+page_assign_frame(struct thread *t, struct page_node *pnode, struct frame_node *fnode, bool writable)
 {
   ASSERT(pnode->loc != LOC_MEMORY);
   ASSERT(pnode->frame_node == NULL)
   ASSERT(fnode->page_node == NULL);
   ASSERT(fnode->kaddr != NULL);
+
+  // 获取upage, 即uaddr的高20位, 低12位为0 
+  void *upage = pnode->upage;
+
+  // pagedir_set_page中分配了upage的PTE并创建其所在的页表
+  bool success = pagedir_set_page(t->pagedir, upage, fnode->kaddr, writable);
+  if (!success)
+  {
+    free(fnode);
+    printf("page_assign_frame(): Cannot set kpage to upage!\n");
+    return ;
+  }
+
 
   pnode->frame_node = fnode;
   fnode->page_node  = pnode;
@@ -228,46 +245,22 @@ page_assign_frame(struct page_node *pnode, struct frame_node *fnode)
 // 并在当前进程的process page list中添加一个node 
 // 再把它们链接起来
 bool
-page_get_page(struct thread *t, const void *uaddr, uint32_t flags, enum role role)
+page_get_new_page(struct thread *t, const void *uaddr, uint32_t flags, enum role role)
 {
   // 若文件长度不是PGSIZE的整数倍, 你需要在最末尾的页面, 且不是文件的部分上填充0
   if (role == SEG_MMAP)
     flags |= FRM_ZERO;
 
-  struct frame_node *fnode = frame_allocate_page(t->pagedir, uaddr, flags);
+  struct frame_node *fnode = frame_allocate_page(t->pagedir, flags);
   struct page_node  *pnode = page_add_page(t, uaddr, flags, LOC_NOT_PRESENT, role);
+  ASSERT(pnode != NULL);
+  //如果fnode为NULL, 说明我们需要进行页面驱逐!
   if (fnode == NULL)
-    return false;
+    fnode = frame_evict(t);
 
-  page_assign_frame(pnode, fnode);
+  page_assign_frame(t, pnode, fnode, !(flags & FRM_RO));
   if (role == SEG_MMAP)
-  {
-    // 必须整页读取文件
-    uaddr = pg_round_down(uaddr);
-    //  找到对应的文件node
-    struct mmap_vma_node *mnode = page_mmap_seek(t, USE_ADDR, uaddr);     
-    if(mnode == NULL)
-      PANIC("Cannot find mmap mapping accroding to uaddr!\n");
-
-    // IMPORTANT: 必须记录并恢复old_pos!
-    size_t old_pos = file_tell(mnode->file);
-    size_t filesize = mnode->mmap_seg_end - mnode->mmap_seg_begin;
-    // 只读取一页的内容
-    // 准备读取文件, 移动文件指针到pos位置
-    size_t pos = uaddr - mnode->mmap_seg_begin;
-    uint32_t read_bytes = filesize - pos >= PGSIZE ? PGSIZE : filesize - pos;
-    file_seek(mnode->file, pos);
-    if (file_read(mnode->file, (void *)uaddr, read_bytes) != read_bytes)
-    {
-      page_free_page(t, uaddr);
-      PANIC("page_get_page(): read bytes for mmap file failed!\n");
-    }
-    // 清除dirty与accessed位, 避免后续误判
-    pagedir_set_accessed(t->pagedir, uaddr, false);
-    pagedir_set_dirty(t->pagedir, uaddr, false); 
-    file_seek(mnode->file, old_pos);
-  }
-
+    page_mmap_readin(t, (void *)uaddr);
 
   return true;
 }
@@ -385,6 +378,35 @@ page_allocate_mapid(struct thread *t)
   return (++t->vma.mapid);
 }
 
+static void
+page_mmap_readin(struct thread *t, void *uaddr)
+{
+    // 必须整页读取文件
+    uaddr = pg_round_down(uaddr);
+    //  找到对应的文件node
+    struct mmap_vma_node *mnode = page_mmap_seek(t, USE_ADDR, uaddr);     
+    if(mnode == NULL)
+      PANIC("Cannot find mmap mapping accroding to uaddr!\n");
+
+    // IMPORTANT: 必须记录并恢复old_pos!
+    size_t old_pos = file_tell(mnode->file);
+    size_t filesize = mnode->mmap_seg_end - mnode->mmap_seg_begin;
+    // 只读取一页的内容
+    // 准备读取文件, 移动文件指针到pos位置
+    size_t pos = uaddr - mnode->mmap_seg_begin;
+    uint32_t read_bytes = filesize - pos >= PGSIZE ? PGSIZE : filesize - pos;
+    file_seek(mnode->file, pos);
+    if (file_read(mnode->file, (void *)uaddr, read_bytes) != read_bytes)
+    {
+      page_free_page(t, uaddr);
+      PANIC("page_get_new_page(): read bytes for mmap file failed!\n");
+    }
+    // 清除dirty与accessed位, 避免后续误判
+    pagedir_set_accessed(t->pagedir, uaddr, false);
+    pagedir_set_dirty(t->pagedir, uaddr, false); 
+    file_seek(mnode->file, old_pos);
+}
+
 void 
 page_mmap_writeback(struct thread *t, mapid_t mapid)
 {
@@ -471,10 +493,11 @@ page_mmap_unmap(struct thread *t, mapid_t mapid)
   page_mmap_writeback(t, mapid);
   page_free_multiple(t, mnode->mmap_seg_begin, mnode->mmap_seg_end); 
   list_remove(&mnode->elem);
-  // file_close(mnode->file);
   free(mnode);
 }
 
+// unmap一个进程持有的所有mmap对象
+// 一般在进程结束时调用
 void
 page_mmap_unmap_all(struct thread *t)
 {
@@ -491,3 +514,38 @@ page_mmap_unmap_all(struct thread *t)
     page_mmap_unmap(t, mnode->mapid);
   }
 }
+
+void
+page_set_rw(struct thread *t, const void *uaddr, bool writable)
+{
+  uint32_t *pte = lookup_page(t->pagedir, uaddr, false);
+  ASSERT(pte != NULL);
+  if (!writable)
+    *pte &= ~(uint32_t)PTE_W;
+  else 
+    *pte |=  PTE_W;
+}
+
+// 当发生Page Fault且进程发现自己持有某个页面
+// 但这个页面不在内存中, 我们需要把页面从文件或swap中拉取过来
+void
+page_pull_page(struct thread *t, struct page_node *pnode, enum role role)
+{
+  ASSERT(pnode != NULL);
+  ASSERT(pnode->loc != LOC_MEMORY && pnode->loc != LOC_NOT_PRESENT);
+
+  struct frame_node *fnode = frame_evict(t);
+  page_assign_frame(t, pnode, fnode, false);
+
+  //接下来把文件内容复制到内存中
+  if (pnode->role == SEG_MMAP)
+    page_mmap_readin(t, pnode->upage);
+  else if(pnode->role == SEG_STACK)
+  {
+    ASSERT(pnode->swap_pg_idx != SIZE_MAX);
+    swap_out(pnode->swap_pg_idx, pnode->upage);
+  }
+
+  pnode->loc = LOC_MEMORY;
+}
+

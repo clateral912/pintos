@@ -694,7 +694,7 @@ setup_stack (void **esp)
 {
   struct thread *cur = thread_current();
   bool success = false;
-  success = page_get_page(cur, ((uint8_t *) PHYS_BASE) - PGSIZE, FRM_ZERO | FRM_RW, SEG_STACK);
+  success = page_get_new_page(cur, ((uint8_t *) PHYS_BASE) - PGSIZE, FRM_ZERO | FRM_RW, SEG_STACK);
   if (success)
   {
     cur->vma.stack_seg_end = PHYS_BASE;

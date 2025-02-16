@@ -33,6 +33,7 @@
 #endif
 #include "../vm/page.h"
 #include "../vm/frame.h"
+#include "../vm/swap.h"
 #ifdef FILESYS
 #include "devices/block.h"
 #include "devices/ide.h"
@@ -130,8 +131,10 @@ pintos_init (void)
   filesys_init (format_filesys);
 #endif
   
+  // VM部分初始化
   page_init();
   frame_init();
+  swap_init();
 
   printf ("Boot complete.\n");
   printf ("kituro from here!\n");

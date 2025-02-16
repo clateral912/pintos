@@ -189,8 +189,8 @@ page_fault (struct intr_frame *f)
     // 如果没有在SPT里找到page:
     if (page == NULL)
     {
-      // 分配页面
-      page_get_page(cur, fault_addr, cur->page_default_flags, role);
+      // 分配新页面
+      page_get_new_page(cur, fault_addr, cur->page_default_flags, role);
       // 更新进程的VMA
       switch(role)
       {
