@@ -168,7 +168,13 @@ page_fault (struct intr_frame *f)
   if (!from_user_vm && user)
     syscall_exit(f, -1);
 
-  cur->vma.stack_seg_begin = f->esp;
+  // 用户地址的Page Fault却由kernel引起: 
+  // Kernel试图在syscall中访问未分配的用户内存!
+  if (from_user_vm && !user)
+    cur->vma.stack_seg_begin = cur->intr_stack;
+  else
+    cur->vma.stack_seg_begin = f->esp;
+
   enum role role = page_check_role(cur, fault_addr);
   if (role == SEG_UNUSED)
     syscall_exit(f, -1);   
@@ -221,6 +227,8 @@ page_fault (struct intr_frame *f)
       // 如果用户进程在页面存在的情况下, 向只读内存区域进行读取, 一定是不合法的访问!
       if (write && user)
         syscall_exit(f, -1);
+
+      page_pull_page(cur, page);
     }
   }
   

@@ -137,6 +137,7 @@ struct thread
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
+    uint8_t *intr_stack;
     int priority;                       /* Priority. */
     int base_priority;
     int64_t wake_time;
@@ -189,6 +190,7 @@ void thread_block (void);
 void thread_unblock (struct thread *);
 
 struct thread *thread_current (void);
+struct thread *running_thread (void);
 tid_t thread_tid (void);
 const char *thread_name (void);
 

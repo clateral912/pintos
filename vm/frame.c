@@ -50,7 +50,6 @@ frame_allocate_page(uint32_t *pd, uint32_t flags)
   if (kpage == NULL)
   {
     free(node);
-    PANIC("frame_allocate_page(): Cannot allocate memory for kpage! Maybe no more pages?\n");
     return NULL;
   }
 
@@ -96,6 +95,8 @@ frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
       page_idx = swap_in(upage);
   }
   
+  // 将此页的"Present"标志位清零, 确保下一次进程访问该页面时会发生Page Fault
+  pagedir_clear_page(t->pagedir, upage);
   pnode->swap_pg_idx  = page_idx;
   pnode->loc          = pnode->role == SEG_MMAP ? LOC_FILE : LOC_SWAP;
   pnode->frame_node   = NULL;
@@ -128,11 +129,12 @@ frame_evict(struct thread *t)
     
     bool accessed  = pagedir_is_accessed(t->pagedir, upage); 
     bool dirty     = pagedir_is_dirty(t->pagedir, upage);
+    bool writable  = *pte & PTE_W;
 
     if (flist_ptr == old_ptr)
       second_turn = true;
 
-    if (fnode->evictable)
+    if (fnode->evictable && writable)
     {
       if (!second_turn)
       {

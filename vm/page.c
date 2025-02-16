@@ -529,7 +529,7 @@ page_set_rw(struct thread *t, const void *uaddr, bool writable)
 // 当发生Page Fault且进程发现自己持有某个页面
 // 但这个页面不在内存中, 我们需要把页面从文件或swap中拉取过来
 void
-page_pull_page(struct thread *t, struct page_node *pnode, enum role role)
+page_pull_page(struct thread *t, struct page_node *pnode)
 {
   ASSERT(pnode != NULL);
   ASSERT(pnode->loc != LOC_MEMORY && pnode->loc != LOC_NOT_PRESENT);
