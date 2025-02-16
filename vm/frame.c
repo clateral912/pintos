@@ -117,10 +117,10 @@ frame_evict(struct thread *t)
   for (;;)
   {
     // 我们的链表是有头尾节点的, 头尾节点是不在任何node中的
-    if (list_next(flist_ptr) != list_end(&frame_list)) 
-      flist_ptr = list_next(flist_ptr);
-    else
+    if (flist_ptr == list_end(&frame_list))
       flist_ptr = list_begin(&frame_list);
+
+    flist_ptr = list_next(flist_ptr);
 
     fnode = list_entry(flist_ptr, struct frame_node, elem);
     void *upage = fnode->page_node->upage;
@@ -159,5 +159,6 @@ frame_evict(struct thread *t)
       }
     }
   }    
+  printf("Out of frame_evict()!\n");
 }
 

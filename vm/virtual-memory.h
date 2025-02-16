@@ -24,6 +24,7 @@ enum location{
 enum role{
   SEG_STACK,
   SEG_CODE,
+  SEG_DATA,
   SEG_MMAP,
   SEG_UNUSED
 };

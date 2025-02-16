@@ -16,7 +16,7 @@ void page_destroy_pagelist(struct thread *);
 void page_assign_frame(struct thread *t, struct page_node *pnode, struct frame_node *fnode, bool writable);
 bool page_get_new_page(struct thread *t, const void *uaddr, uint32_t flags, enum role role);
 void page_free_page(struct thread *t, const void *uaddr);
-enum role page_check_role(struct thread *t, const void *uaddr);
+enum role page_check_role(struct thread *t, const void *uaddr, bool writable);
 mapid_t page_mmap_map(struct thread *t, uint32_t fd, struct file *file, void *addr);
 void page_mmap_unmap(struct thread *t, mapid_t mapid);
 struct mmap_vma_node *page_mmap_seek(struct thread *t, mapid_t mapid, const void *addr);

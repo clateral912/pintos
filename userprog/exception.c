@@ -143,6 +143,7 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   bool from_user_vm; /* é æPage Faultçå°åæ¥èªç¨æ·åå­ç©ºé´ */
+  bool writable_flag;
   void *fault_addr;  /* Fault address. */
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -163,19 +164,21 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
   from_user_vm = is_user_vaddr(fault_addr);
-
+  // 我知道这一行看起来很奇怪, 但你要容忍!
+  writable_flag = !(cur->page_default_flags & FRM_NO_EVICT);
+  
   // 用户空间发生的错误且addr指向了内核空间: 一定是不合法的访问! 杀死进程
   if (!from_user_vm && user)
     syscall_exit(f, -1);
 
-  // 用户地址的Page Fault却由kernel引起: 
+  // 用户地址的Page Fault却由kernel引起, 且当前cur->intr_stack不为NULL: 
   // Kernel试图在syscall中访问未分配的用户内存!
-  if (from_user_vm && !user)
+  if (from_user_vm && !user && cur->intr_stack != NULL)
     cur->vma.stack_seg_begin = cur->intr_stack;
   else
     cur->vma.stack_seg_begin = f->esp;
 
-  enum role role = page_check_role(cur, fault_addr);
+  enum role role = page_check_role(cur, fault_addr, writable_flag);
   if (role == SEG_UNUSED)
     syscall_exit(f, -1);   
 
@@ -206,6 +209,9 @@ page_fault (struct intr_frame *f)
           break;
         case SEG_CODE:
           cur->vma.code_seg_end = (uint8_t *)(cur->vma.code_seg_end) + PGSIZE;
+          break;
+        case SEG_DATA:
+          cur->vma.data_seg_end = (uint8_t *)(cur->vma.data_seg_end) + PGSIZE;
           break;
         case SEG_MMAP:
           //do nothing

@@ -64,13 +64,17 @@ struct vma
 {
   bool loading_exe;
   uint8_t mapid;
+
   void *code_seg_begin;
   void *code_seg_end;
 
-  struct list mmap_vma_list;
+  void *data_seg_begin;
+  void *data_seg_end;
 
   void *stack_seg_begin;
   void *stack_seg_end;
+
+  struct list mmap_vma_list;
 };
 
 

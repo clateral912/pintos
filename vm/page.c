@@ -320,16 +320,24 @@ page_mmap_seek(struct thread *t, mapid_t mapid, const void *addr)
 //检查传入的uaddr在数据段中的合法性, 返回其位于哪个数据段(role)
 //若uaddr不合法, 返回SEG_UNUSED
 enum role
-page_check_role(struct thread *t, const void *uaddr)
+page_check_role(struct thread *t, const void *uaddr, bool writable)
 {
   void *esp = t->vma.stack_seg_begin;
   // 注意! 地址不包含end!
   if (uaddr >= t->vma.code_seg_begin && uaddr < t->vma.code_seg_end)
     return SEG_CODE;
 
-  //如果uaddr恰好位于code段的最高位并且当前正在读取exe文件
+  // uaddr位于Code或Data段的边缘, 且正在加载exe, 且可读写:
+  // 该段为Data段!
+  if ((uaddr == t->vma.code_seg_end || uaddr == t->vma.data_seg_end)
+      && 
+      t->vma.loading_exe 
+      && 
+      writable)
+    return SEG_DATA;
+  //如果uaddr恰好位于code段的最高位并且当前正在读取exe文件, 且仅只读
   //说明访问是合法的, 且uaddr应该是code段的地址
-  if (uaddr == t->vma.code_seg_end && t->vma.loading_exe)
+  if (uaddr == t->vma.code_seg_end && t->vma.loading_exe && !writable)
     return SEG_CODE;
 
   // 栈空间最大不超过8Mib (0x00800000 bytes)
@@ -353,6 +361,9 @@ page_mmap_overlap(struct thread *t, void *addr, size_t filesize)
   void *end   = (uint8_t *)(addr) + filesize;
 
   if (!(begin >= t->vma.code_seg_end || end <= t->vma.code_seg_begin))
+    return false;
+
+  if (!(begin >= t->vma.data_seg_end || end <= t->vma.data_seg_begin))
     return false;
 
   if (end >= t->vma.stack_seg_begin)

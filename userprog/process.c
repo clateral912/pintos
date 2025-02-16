@@ -646,13 +646,23 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
   cur->vma.code_seg_end = upage;
   cur->vma.loading_exe      = true;
-  cur->page_default_flags   = FRM_ZERO | FRM_NO_EVICT | FRM_RW;
-  //cur->page_default_flags  |= writable ? FRM_RW : FRM_RO;
-  //如果此处设置了read_only , 会造成后续无法写入文件!
-  //TODO: 实现read_only的功能
 
   while (read_bytes > 0 || zero_bytes > 0) 
     {
+      // 这里其实取了个巧, 所有可写(writable)的段应该是数据段(Data Segment)
+      // 数据段是可被驱逐的!
+      if (writable)
+      {
+        // 给数据段的段首赋初值
+        if (cur->vma.data_seg_begin == NULL)
+        {
+          cur->vma.data_seg_begin = upage;
+          cur->vma.data_seg_end   = upage;
+        }
+        cur->page_default_flags   = FRM_ZERO | FRM_RW;  // 数据段是可被驱逐的!
+      }
+      else
+        cur->page_default_flags   = FRM_ZERO | FRM_NO_EVICT | FRM_RW;  //先设置为可读写, 在加载后设置为只读
       /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
          and zero the final PAGE_ZERO_BYTES bytes. */
