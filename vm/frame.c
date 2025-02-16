@@ -103,11 +103,13 @@ frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
   fnode->page_node    = NULL;
 }
 
-// 在当前的frame table中按照Clock算法驱逐出一页(放入swap磁盘)
+// 在当前的frame table中按照[改进版]Clock算法驱逐出一页(放入swap磁盘)
 // 随后返回被驱逐后已经可用的frame_node
 // 注意! 没有清空frame的内容!
+// IMPORTANT: 在多进程的情况下, frame_list中的frame有各自的主人!
+// 必须对owner做判断! 
 struct frame_node *
-frame_evict(struct thread *t)
+frame_evict()
 {
   struct frame_node *fnode;
   struct list_elem *e;
@@ -124,8 +126,13 @@ frame_evict(struct thread *t)
 
     fnode = list_entry(flist_ptr, struct frame_node, elem);
     void *upage = fnode->page_node->upage;
-    uint32_t *pte = lookup_page(t->pagedir, upage, false);
-    ASSERT(pte != NULL)
+    // 必须按照进程来访问pagedir!
+    struct thread *t = fnode->page_node->owner;
+    // 如果找不到pte则创建一个
+    // 为什么找不到? 因为进程切换, 页目录(Page Directory)也切换了!
+    // 若前一个进程
+    uint32_t *pte = lookup_page(t->pagedir, upage, true);
+    // ASSERT(pte != NULL)
     
     bool accessed  = pagedir_is_accessed(t->pagedir, upage); 
     bool dirty     = pagedir_is_dirty(t->pagedir, upage);

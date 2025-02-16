@@ -143,7 +143,7 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
     PANIC("Cannot allocate memory to store a page in SPT!\n");
 
   //初始化Page Node
-  node->owner       = t->tid;
+  node->owner       = t;
   node->upage       = pg_round_down(uaddr);;
   node->sharing     = flags & PG_SHARING;
   node->loc         = loc;
@@ -256,7 +256,7 @@ page_get_new_page(struct thread *t, const void *uaddr, uint32_t flags, enum role
   ASSERT(pnode != NULL);
   //如果fnode为NULL, 说明我们需要进行页面驱逐!
   if (fnode == NULL)
-    fnode = frame_evict(t);
+    fnode = frame_evict();
 
   page_assign_frame(t, pnode, fnode, !(flags & FRM_RO));
   if (role == SEG_MMAP)
@@ -327,6 +327,12 @@ page_check_role(struct thread *t, const void *uaddr, bool writable)
   if (uaddr >= t->vma.code_seg_begin && uaddr < t->vma.code_seg_end)
     return SEG_CODE;
 
+  if (uaddr >= t->vma.data_seg_begin && uaddr < t->vma.data_seg_end)
+    return SEG_DATA;
+
+  if (uaddr >= t->vma.stack_seg_begin && uaddr < t->vma.stack_seg_end)
+    return SEG_STACK;
+
   // uaddr位于Code或Data段的边缘, 且正在加载exe, 且可读写:
   // 该段为Data段!
   if ((uaddr == t->vma.code_seg_end || uaddr == t->vma.data_seg_end)
@@ -335,14 +341,10 @@ page_check_role(struct thread *t, const void *uaddr, bool writable)
       && 
       writable)
     return SEG_DATA;
-  //如果uaddr恰好位于code段的最高位并且当前正在读取exe文件, 且仅只读
+  //如果uaddr恰好位于code段的最高位并且当前正在读取exe文件, 且只读
   //说明访问是合法的, 且uaddr应该是code段的地址
   if (uaddr == t->vma.code_seg_end && t->vma.loading_exe && !writable)
     return SEG_CODE;
-
-  // 栈空间最大不超过8Mib (0x00800000 bytes)
-  if (uaddr >= t->vma.stack_seg_begin && uaddr < t->vma.stack_seg_end)
-    return SEG_STACK;
 
   if (uaddr == esp - 4 || uaddr == esp - 32)
     return SEG_STACK;
@@ -545,13 +547,15 @@ page_pull_page(struct thread *t, struct page_node *pnode)
   ASSERT(pnode != NULL);
   ASSERT(pnode->loc != LOC_MEMORY && pnode->loc != LOC_NOT_PRESENT);
 
-  struct frame_node *fnode = frame_evict(t);
-  page_assign_frame(t, pnode, fnode, false);
+  struct frame_node *fnode = frame_evict();
+  // 默认可读写, 能被换出的页面一定是可读写的!
+  // 不可能有只读页面被换出!
+  page_assign_frame(t, pnode, fnode, true);
 
   //接下来把文件内容复制到内存中
   if (pnode->role == SEG_MMAP)
     page_mmap_readin(t, pnode->upage);
-  else if(pnode->role == SEG_STACK)
+  else if(pnode->role == SEG_STACK || pnode->role == SEG_DATA)
   {
     ASSERT(pnode->swap_pg_idx != SIZE_MAX);
     swap_out(pnode->swap_pg_idx, pnode->upage);

@@ -231,10 +231,13 @@ page_fault (struct intr_frame *f)
     {
       // TODO: 从swap中拉取内存页面
       // 如果用户进程在页面存在的情况下, 向只读内存区域进行读取, 一定是不合法的访问!
-      if (write && user)
+      if (write && user && !not_present)
         syscall_exit(f, -1);
 
       page_pull_page(cur, page);
+
+      //返回原位继续执行
+      return ;
     }
   }
   

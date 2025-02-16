@@ -18,6 +18,6 @@ extern struct list frame_list;
 void frame_init(void);
 struct frame_node *frame_allocate_page(uint32_t *pd, uint32_t flags);
 void frame_destroy_frame(struct frame_node *fnode);
-struct frame_node *frame_evict(struct thread *t);
+struct frame_node *frame_evict(void);
 
 #endif
