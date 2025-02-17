@@ -3,8 +3,10 @@
 #include <list.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <bitmap.h>
 #include "../threads/malloc.h"
 #include "../threads/thread.h"
+#include "../threads/palloc.h"
 #include "../userprog/pagedir.h"
 #include "stdbool.h"
 #include "swap.h"
@@ -66,6 +68,12 @@ frame_allocate_page(uint32_t *pd, uint32_t flags)
   return node;
 }
 
+inline bool
+frame_full()
+{
+  return frame_cnt >= 327;
+}
+
 //完全销毁一个frame对象, 释放其对应的upage与kpage的内存空间
 //删除所有引用关系
 void 
@@ -73,17 +81,25 @@ frame_destroy_frame(struct frame_node *fnode)
 {
   ASSERT(fnode != NULL);
 
-  fnode->page_node->frame_node = NULL;
+  if (&fnode->elem == flist_ptr)
+    flist_ptr = list_prev(flist_ptr);
+    
   palloc_free_page(fnode->kaddr);
   list_remove(&fnode->elem);
   free(fnode);
 }
 
 //将内存中的页面换入文件中或swap磁盘中
+//注意! 进程A可能选择将内存中进程B的页面写回磁盘
+//此时进程A需要访问进程B页面中的数据, 但页目录已经切换
+//无法通过访问B->upage的形式来获取B页面的数据
+//因此必须通过访问B->upage对应的kpage来获取数据!
+//因此传入swap_in的参数是kpage!
 static void
 frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
 {
   struct page_node *pnode = fnode->page_node;
+  void *kpage = fnode->kaddr;
   void *upage = pnode->upage;
   size_t page_idx = SIZE_MAX;
 
@@ -96,7 +112,7 @@ frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
       page_mmap_writeback(t, mnode->mapid);
     } 
     else
-      page_idx = swap_in(upage);
+      page_idx = swap_in(kpage);
   }
   
   // 将此页的"Present"标志位清零, 确保下一次进程访问该页面时会发生Page Fault
@@ -125,7 +141,6 @@ frame_evict()
   for (;;)
   {
     // 我们的链表是有头尾节点的, 头尾节点是不在任何node中的
-
 
     if (flist_ptr == list_end(&frame_list))
       flist_ptr = list_begin(&frame_list);

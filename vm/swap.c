@@ -50,18 +50,18 @@ swap_free_used_sector(size_t page_idx)
 // 将起始位置位于uaddr的页面换入swap磁盘中
 // 并返回page_idx
 size_t 
-swap_in(const void *upage)
+swap_in(const void *kpage)
 {
-  ASSERT(pg_ofs(upage) == 0);
+  ASSERT(pg_ofs(kpage) == 0);
   block_sector_t free_sector_begin = swap_get_free_sector();
   ASSERT(free_sector_begin != BITMAP_ERROR);
   size_t page_idx = free_sector_begin / SECTOR_PER_PAGE;
 
   for (int i = SECTOR_PER_PAGE; i > 0; i--)
   {
-    block_write(swap_disk, free_sector_begin, upage);
+    block_write(swap_disk, free_sector_begin, kpage);
     free_sector_begin += 1;
-    upage += BLOCK_SECTOR_SIZE;
+    kpage += BLOCK_SECTOR_SIZE;
   }
 
   return page_idx;

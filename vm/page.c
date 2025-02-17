@@ -22,6 +22,7 @@ uint32_t page_cnt;
 
 void page_free_multiple(struct thread *t, const void *begin, const void *end);
 static void page_mmap_readin(struct thread *t, void *uaddr);
+static void page_update_vma(struct thread *t, enum role role);
 
 static unsigned 
 page_process_hash_hash(const struct hash_elem *elem, void *aux UNUSED)
@@ -167,10 +168,42 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
     free(node);
     return NULL;
   }
+  page_update_vma(t, role);
   
   page_cnt++;
 
   return node;
+}
+
+//以页为单位更新VMA
+static void
+page_update_vma(struct thread *t, enum role role)
+{
+  // 更新进程的VMA
+  switch(role)
+  {
+    case SEG_STACK:
+      // 注意! 栈是向下生长的!
+      t->vma.stack_seg_begin = (uint8_t *)(t->vma.stack_seg_begin) - PGSIZE;
+      break;
+    case SEG_CODE:
+      t->vma.code_seg_end = (uint8_t *)(t->vma.code_seg_end) + PGSIZE;
+      break;
+    case SEG_DATA:
+      t->vma.data_seg_end = (uint8_t *)(t->vma.data_seg_end) + PGSIZE;
+      break;
+    case SEG_MMAP:
+      //do nothing
+      //因为mmap的VMA不需要更新
+      break;
+    case SEG_UNUSED:
+      NOT_REACHED();
+      break;
+    default:
+      // TODO: 实现mmap的vma更新 
+      break;
+  }
+
 }
 
 void

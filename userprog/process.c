@@ -641,14 +641,17 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   struct thread *cur = thread_current();
   file_seek (file, ofs);
 
+  //为Code段设置初始值
   if ((void *)upage < cur->vma.code_seg_begin || cur->vma.code_seg_begin == NULL)
     cur->vma.code_seg_begin   = upage;
 
   cur->vma.code_seg_end = upage;
-  cur->vma.loading_exe      = true;
+  cur->vma.loading_exe  = true;
 
   while (read_bytes > 0 || zero_bytes > 0) 
     {
+      enum role role = SEG_UNUSED;
+
       // 这里其实取了个巧, 所有可写(writable)的段应该是数据段(Data Segment)
       // 数据段是可被驱逐的!
       if (writable)
@@ -660,10 +663,23 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           cur->vma.data_seg_end   = upage;
         }
         cur->page_default_flags   = FRM_ZERO | FRM_RW;  // 数据段是可被驱逐的!
+        role = SEG_DATA;
       }
       else
+      {
         cur->page_default_flags   = FRM_ZERO | FRM_NO_EVICT | FRM_RW;  //先设置为可读写, 在加载后设置为只读
-      /* Calculate how to fill this page.
+        role = SEG_CODE;
+      }
+
+      // IMPORTANT :如果内存已满, 手动准备一页页面
+      // 此时不能等到用户进程读取子进程文件时再触发Page Fault再惰性加载页面!
+      // 这样做的结果是CATASTROPHICAL的!!!!!!
+      // 因为用户进程需要在持有ide设备锁的情况下, 尝试将某个内存页写入swap磁盘
+      // 而又会试图持有同一把锁, 引发恶性竞争与致命bug!
+      if (frame_full())
+        page_get_new_page(cur, upage, cur->page_default_flags, role);
+
+        /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;

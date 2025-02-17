@@ -200,31 +200,7 @@ page_fault (struct intr_frame *f)
     {
       // 分配新页面
       page_get_new_page(cur, fault_addr, cur->page_default_flags, role);
-      // 更新进程的VMA
-      switch(role)
-      {
-        case SEG_STACK:
-          // 注意! 栈是向下生长的!
-          cur->vma.stack_seg_begin = (uint8_t *)(cur->vma.stack_seg_begin) - PGSIZE;
-          break;
-        case SEG_CODE:
-          cur->vma.code_seg_end = (uint8_t *)(cur->vma.code_seg_end) + PGSIZE;
-          break;
-        case SEG_DATA:
-          cur->vma.data_seg_end = (uint8_t *)(cur->vma.data_seg_end) + PGSIZE;
-          break;
-        case SEG_MMAP:
-          //do nothing
-          //因为mmap的VMA不需要更新
-          break;
-        case SEG_UNUSED:
-          NOT_REACHED();
-          break;
-        default:
-          // TODO: 实现mmap的vma更新 
-          break;
-      }
-      // 返回原位继续执行
+     // 返回原位继续执行
       return ;
     }
     else 
