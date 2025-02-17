@@ -1,9 +1,11 @@
 #include "page.h"
+#include "bitmap.h"
 #include "frame.h"
 #include <hash.h>
 #include "../threads/malloc.h"
 #include "../filesys/file.h"
 #include "../filesys/filesys.h"
+#include "../threads/palloc.h"
 #include "../threads/synch.h"
 #include "../userprog/pagedir.h"
 #include <list.h>
@@ -16,6 +18,7 @@
 
 struct hash process_list;
 struct lock process_list_lock;
+uint32_t page_cnt;
 
 void page_free_multiple(struct thread *t, const void *begin, const void *end);
 static void page_mmap_readin(struct thread *t, void *uaddr);
@@ -102,6 +105,7 @@ page_init()
 {
   hash_init(&process_list, page_process_hash_hash, page_process_hash_less, NULL); 
   lock_init(&process_list_lock);
+  page_cnt = 0;
 }
 
 void 
@@ -163,10 +167,18 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
     free(node);
     return NULL;
   }
+  
+  page_cnt++;
 
   return node;
 }
 
+void
+page_print_vm_stat()
+{
+  printf("frame: %d, page: %d\n", frame_cnt, page_cnt);
+  printf("kernel pool remaining pages: %zu\n", bitmap_count(kernel_pool.used_map, 0, kernel_pool.used_map->bit_cnt, false));
+}
 // 在SPT中寻找uaddr对应的页面对象(Page Node)
 struct page_node *
 page_seek(struct thread *t, const void *uaddr)

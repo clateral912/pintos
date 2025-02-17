@@ -1,5 +1,7 @@
 #include "swap.h"
 #include <bitmap.h>
+#include "../threads/thread.h"
+#include "../threads/synch.h"
 #include "../threads/vaddr.h"
 #include "../devices/block.h"
 
@@ -7,7 +9,7 @@
 #define SWAP_SIZE 4194304 
 #define BITMAP_START 0
 #define SINGLE_PAGE 1 
-#define SECTOR_PER_PAGE 4
+#define SECTOR_PER_PAGE 8
 #define FREE 0
 #define USED 1
 
@@ -32,7 +34,7 @@ static block_sector_t
 swap_get_free_sector()
 {
   size_t page_idx = bitmap_scan_and_flip(swap_bitmap, BITMAP_START, SINGLE_PAGE, FREE);
-  return page_idx * 4;
+  return page_idx * SECTOR_PER_PAGE;
 }
 
 // 释放第page_idx位
@@ -52,6 +54,7 @@ swap_in(const void *upage)
 {
   ASSERT(pg_ofs(upage) == 0);
   block_sector_t free_sector_begin = swap_get_free_sector();
+  ASSERT(free_sector_begin != BITMAP_ERROR);
   size_t page_idx = free_sector_begin / SECTOR_PER_PAGE;
 
   for (int i = SECTOR_PER_PAGE; i > 0; i--)

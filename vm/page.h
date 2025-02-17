@@ -23,5 +23,6 @@ struct mmap_vma_node *page_mmap_seek(struct thread *t, mapid_t mapid, const void
 void page_mmap_unmap_all(struct thread *t);
 void page_mmap_writeback(struct thread *t, mapid_t mapid);
 void page_pull_page(struct thread *t, struct page_node *pnode);
+void page_print_vm_stat();
 
 #endif // !VM_PAGE_H

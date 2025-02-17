@@ -4,11 +4,9 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "loader.h"
-#include "synch.h"
 #include "vaddr.h"
 
 /* Page allocator.  Hands out memory in page-size (or
@@ -21,20 +19,12 @@
    that the kernel needs to have memory for its own operations
    even if user processes are swapping like mad.
 
-   By default, half of system RAM is given to the kernel pool and
+ j By default, half of system RAM is given to the kernel pool and
    half to the user pool.  That should be huge overkill for the
    kernel pool, but that's just fine for demonstration purposes. */
 
-/* A memory pool. */
-struct pool
-  {
-    struct lock lock;                   /* Mutual exclusion. */
-    struct bitmap *used_map;            /* Bitmap of free pages. */
-    uint8_t *base;                      /* Base of pool. */
-  };
-
 /* Two pools: one for kernel data, one for user pages. */
-static struct pool kernel_pool, user_pool;
+struct pool kernel_pool, user_pool;
 
 static void init_pool (struct pool *, void *base, size_t page_cnt,
                        const char *name);

@@ -14,12 +14,13 @@
 
 struct list frame_list;
 struct list_elem *flist_ptr;
-
+uint32_t frame_cnt;
 
 void frame_init()
 {
   list_init(&frame_list);
   flist_ptr = list_begin(&frame_list);
+  frame_cnt = 0;
 }
 
 // TODO: 尚未实现evict功能!
@@ -58,6 +59,9 @@ frame_allocate_page(uint32_t *pd, uint32_t flags)
   node->page_node = NULL;
 
   list_push_back(&frame_list, &node->elem);
+
+  flist_ptr = &node->elem;
+  frame_cnt++;
 
   return node;
 }
@@ -114,15 +118,17 @@ frame_evict()
   struct frame_node *fnode;
   struct list_elem *e;
   
-  struct list_elem *old_ptr = flist_ptr;
   bool second_turn = false;
+
+  struct list_elem *old_ptr = flist_ptr;
+  
   for (;;)
   {
     // 我们的链表是有头尾节点的, 头尾节点是不在任何node中的
+
+
     if (flist_ptr == list_end(&frame_list))
       flist_ptr = list_begin(&frame_list);
-
-    flist_ptr = list_next(flist_ptr);
 
     fnode = list_entry(flist_ptr, struct frame_node, elem);
     void *upage = fnode->page_node->upage;
@@ -131,8 +137,8 @@ frame_evict()
     // 如果找不到pte则创建一个
     // 为什么找不到? 因为进程切换, 页目录(Page Directory)也切换了!
     // 若前一个进程
-    uint32_t *pte = lookup_page(t->pagedir, upage, true);
-    // ASSERT(pte != NULL)
+    uint32_t *pte = lookup_page(t->pagedir, upage, false);
+    ASSERT(pte != NULL)
     
     bool accessed  = pagedir_is_accessed(t->pagedir, upage); 
     bool dirty     = pagedir_is_dirty(t->pagedir, upage);
@@ -165,7 +171,8 @@ frame_evict()
         pagedir_set_accessed(t->pagedir, upage, false);
       }
     }
+
+    flist_ptr = list_next(flist_ptr);
   }    
-  printf("Out of frame_evict()!\n");
 }
 
