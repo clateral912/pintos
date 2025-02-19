@@ -102,8 +102,6 @@ frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
   size_t page_idx = SIZE_MAX;
 
   // 如果页面是脏页, 那么需要写回到文件或磁盘中
-  if (dirty)
-  {
     if (pnode->role == SEG_MMAP)
     {
       struct mmap_vma_node *mnode = page_mmap_seek(t, USE_ADDR, upage);
@@ -111,7 +109,6 @@ frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
     } 
     else
       page_idx = swap_in(kpage);
-  }
   
   // 将此页的"Present"标志位清零, 确保下一次进程访问该页面时会发生Page Fault
   pagedir_clear_page(t->pagedir, upage);
@@ -127,12 +124,13 @@ frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
 // IMPORTANT: 在多进程的情况下, frame_list中的frame有各自的主人!
 // 必须对owner做判断! 
 struct frame_node *
-frame_evict()
+frame_evict(uint32_t flags)
 {
   struct frame_node *fnode;
   struct list_elem *e;
   
   bool second_turn = false;
+  bool evictable  = !(flags & FRM_NO_EVICT);
 
   struct list_elem *old_ptr = flist_ptr;
   
@@ -168,6 +166,7 @@ frame_evict()
         if (!accessed && !dirty)
         {
           frame_swap(t, fnode, dirty);
+          fnode->evictable = evictable;
           return fnode;
         }
       }
@@ -178,6 +177,7 @@ frame_evict()
         if (!accessed)
         {
           frame_swap(t, fnode, dirty);
+          fnode->evictable = evictable;
           return fnode;
         }
         // 将access位设置为false

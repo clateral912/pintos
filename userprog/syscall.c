@@ -220,12 +220,24 @@ syscall_read(struct intr_frame *f)
     return ;
   }
 
+  //TODO: 未在frame_full时做内存安全性检查! 可能fail测试点!
   //如果在读入时内存已满, 我们需要手动分配内存
   //而不是等到ide_read()触发Page Fault后再处理
-  if (frame_full() && (page_check_role(cur, buffer, true) == SEG_UNUSED))
+  if (frame_full())
   {
     size_t pages = DIV_ROUND_UP(size, PGSIZE);
-    page_get_multiple(cur, pages, buffer, cur->page_default_flags, SEG_STACK);
+    void *addr = buffer;
+    while (pages > 0)
+    {
+      struct page_node *pnode = page_seek(cur, addr);
+      if (pnode == NULL)
+        page_get_new_page(cur, addr, FRM_NO_EVICT, SEG_STACK);
+      else if (pnode->loc != LOC_MEMORY)
+        page_pull_page(cur, pnode);
+
+      addr += PGSIZE;
+      pages--;
+    }
   }
 
   struct file *file = process_from_fd_get_file(thread_current(), fd);

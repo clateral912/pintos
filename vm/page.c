@@ -299,7 +299,7 @@ page_get_new_page(struct thread *t, const void *uaddr, uint32_t flags, enum role
   ASSERT(pnode != NULL);
   //如果fnode为NULL, 说明我们需要进行页面驱逐!
   if (fnode == NULL)
-    fnode = frame_evict();
+    fnode = frame_evict(flags);
 
   ASSERT(fnode != NULL);
   page_assign_frame(t, pnode, fnode, !(flags & FRM_RO));
@@ -606,9 +606,10 @@ void
 page_pull_page(struct thread *t, struct page_node *pnode)
 {
   ASSERT(pnode != NULL);
-  ASSERT(pnode->loc != LOC_MEMORY && pnode->loc != LOC_NOT_PRESENT);
+  ASSERT(pnode->loc != LOC_MEMORY);
+  ASSERT(pnode->loc != LOC_NOT_PRESENT);
 
-  struct frame_node *fnode = frame_evict();
+  struct frame_node *fnode = frame_evict(0);
   // 默认可读写, 能被换出的页面一定是可读写的!
   // 不可能有只读页面被换出!
   page_assign_frame(t, pnode, fnode, true);
