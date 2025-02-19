@@ -3,12 +3,14 @@
 #include <string.h>
 #include "../devices/shutdown.h"
 #include "../devices/input.h"
+#include <round.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
 #include "../filesys/filesys.h"
+#include "../vm/frame.h"
 #include "../vm/page.h"
 #include "../vm/virtual-memory.h"
 #include "process.h"
@@ -195,6 +197,7 @@ syscall_close(struct intr_frame *f)
 static void
 syscall_read(struct intr_frame *f)
 {
+  struct thread *cur = thread_current();
   uint32_t *args_ptr = get_args(f);  
   struct syscall_frame_3args *args = (struct syscall_frame_3args *)(args_ptr);
 
@@ -215,6 +218,14 @@ syscall_read(struct intr_frame *f)
     uint8_t key = input_getc();
     retval(f, key);
     return ;
+  }
+
+  //如果在读入时内存已满, 我们需要手动分配内存
+  //而不是等到ide_read()触发Page Fault后再处理
+  if (frame_full() && (page_check_role(cur, buffer, true) == SEG_UNUSED))
+  {
+    size_t pages = DIV_ROUND_UP(size, PGSIZE);
+    page_get_multiple(cur, pages, buffer, cur->page_default_flags, SEG_STACK);
   }
 
   struct file *file = process_from_fd_get_file(thread_current(), fd);

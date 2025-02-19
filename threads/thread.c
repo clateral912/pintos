@@ -914,6 +914,8 @@ static struct thread *
 next_thread_to_run_PriSch (void)
 {
     struct thread *cur = running_thread(); 
+   
+
     if (list_empty(&ready_list))
         return idle_thread;
     

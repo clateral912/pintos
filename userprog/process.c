@@ -9,6 +9,7 @@
 #include "gdt.h"
 #include "list.h"
 #include "pagedir.h"
+#include "stdbool.h"
 #include "tss.h"
 #include "../filesys/file.h"
 #include "../filesys/filesys.h"
@@ -234,6 +235,7 @@ start_process (void *file_name_)
                                     // 128是经过尝试的magic number
   char *save_ptr;
   struct intr_frame if_;
+  struct thread *cur = thread_current();
   bool success;
 
 
@@ -241,12 +243,12 @@ start_process (void *file_name_)
   load_failed = false;
   lock_release(&load_failure_lock);
 
-  page_process_init(thread_current());
+  page_process_init(cur);
 
   strlcpy(args, file_name, MAX_CMDLINE_LENGTH);
   file_name = strtok_r(file_name, " ", &save_ptr);
   // 将当前线程的名字设定为文件名本身
-  strlcpy(thread_current()->name, (const char *)file_name, 16);
+  strlcpy(cur->name, (const char *)file_name, 16);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -262,14 +264,14 @@ start_process (void *file_name_)
   load_failed = !success;
   lock_release(&load_failure_lock);
 
-  sema_up(&thread_current()->pwait_node->parent->exec_sema);
+  sema_up(&cur->pwait_node->parent->exec_sema);
   if (load_failed)
     thread_exit();
   
   // 保证当前正在执行的文件不会被其他进程修改 
-  struct file* file = filesys_open(thread_current()->name);
+  struct file* file = filesys_open(cur->name);
   file_deny_write(file);
-  thread_current()->exec_file = file;
+  cur->exec_file = file;
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in

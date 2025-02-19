@@ -169,7 +169,6 @@ page_add_page(struct thread *t, const void *uaddr, uint32_t flags, enum location
     return NULL;
   }
   page_update_vma(t, role);
-  
   page_cnt++;
 
   return node;
@@ -203,7 +202,6 @@ page_update_vma(struct thread *t, enum role role)
       // TODO: 实现mmap的vma更新 
       break;
   }
-
 }
 
 void
@@ -303,9 +301,27 @@ page_get_new_page(struct thread *t, const void *uaddr, uint32_t flags, enum role
   if (fnode == NULL)
     fnode = frame_evict();
 
+  ASSERT(fnode != NULL);
   page_assign_frame(t, pnode, fnode, !(flags & FRM_RO));
   if (role == SEG_MMAP)
     page_mmap_readin(t, (void *)uaddr);
+
+  return true;
+}
+
+bool
+page_get_multiple(struct thread *t, size_t pages, const void *uaddr, uint32_t flags, enum role role)
+{
+  bool success;
+  while(pages > 0)
+  {
+    success = page_get_new_page(t, uaddr, flags, role);
+    if (!success)
+      return false;
+
+    uaddr += PGSIZE;
+    pages--;
+  }
 
   return true;
 }

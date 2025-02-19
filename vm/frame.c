@@ -25,8 +25,6 @@ void frame_init()
   frame_cnt = 0;
 }
 
-// TODO: 尚未实现evict功能!
-// 根据uaddr, 分配uaddr所在的页面
 // 为进程分配一页新的内存页面, 先获取一页kapge
 // 将upage与kpage建立联系需要在page_assign_frame()中实现!
 // 该函数只实现在物理上分配一页可用的内存

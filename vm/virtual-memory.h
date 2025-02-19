@@ -36,6 +36,7 @@ enum role{
 struct frame_node 
 {
   bool evictable;                 //是否可驱逐
+  bool avail;
   void *kaddr;                    //用户页面映射的内核页面的内核虚拟地址
   struct page_node *page_node;    //被某个进程持有的, 辅助页表的页面对象
   struct list_elem elem;          
