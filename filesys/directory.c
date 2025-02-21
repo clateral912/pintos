@@ -1,10 +1,10 @@
-#include "filesys/directory.h"
+#include "directory.h"
 #include <stdio.h>
 #include <string.h>
 #include <list.h>
-#include "filesys/filesys.h"
-#include "filesys/inode.h"
-#include "threads/malloc.h"
+#include "filesys.h"
+#include "inode.h"
+#include "../threads/malloc.h"
 
 /* A directory. */
 struct dir 
@@ -19,6 +19,8 @@ struct dir_entry
     block_sector_t inode_sector;        /* Sector number of header. */
     char name[NAME_MAX + 1];            /* Null terminated file name. */
     bool in_use;                        /* In use or free? */
+    // in_use的意思是, 这个entry是否指向了一个已经存在的, 有效的文件? 这个entry是否被用掉了?
+    // 而不是 "文件是否正在被使用" !
   };
 
 /* Creates a directory with space for ENTRY_CNT entries in the
@@ -31,9 +33,11 @@ dir_create (block_sector_t sector, size_t entry_cnt)
 
 /* Opens and returns the directory for the given INODE, of which
    it takes ownership.  Returns a null pointer on failure. */
+// 为dir分配内存空间, 并将传入的inode设置为dir的inode
 struct dir *
 dir_open (struct inode *inode) 
 {
+  // calloc(a, b)分配a * b bytes的内存
   struct dir *dir = calloc (1, sizeof *dir);
   if (inode != NULL && dir != NULL)
     {
@@ -51,6 +55,7 @@ dir_open (struct inode *inode)
 
 /* Opens the root directory and returns a directory for it.
    Return true if successful, false on failure. */
+// 这英文原版注释写的什么玩意儿???
 struct dir *
 dir_open_root (void)
 {
@@ -59,6 +64,8 @@ dir_open_root (void)
 
 /* Opens and returns a new directory for the same inode as DIR.
    Returns a null pointer on failure. */
+// 返回指向一个inode的新dir对象
+// 可以有多个dir对象指向同一个inode!
 struct dir *
 dir_reopen (struct dir *dir) 
 {
@@ -88,6 +95,7 @@ dir_get_inode (struct dir *dir)
    if EP is non-null, and sets *OFSP to the byte offset of the
    directory entry if OFSP is non-null.
    otherwise, returns false and ignores EP and OFSP. */
+// 以ep和ofsp作为"返回值" 分别指向一个dir_entry对象和该entry在inode中的offset
 static bool
 lookup (const struct dir *dir, const char *name,
         struct dir_entry *ep, off_t *ofsp) 
@@ -98,6 +106,7 @@ lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
+  // 以一个dir_entry的大小为步进, 逐个读取dir中的entry, 并比较文件名
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
        ofs += sizeof e) 
     if (e.in_use && !strcmp (name, e.name)) 
@@ -115,6 +124,7 @@ lookup (const struct dir *dir, const char *name,
    and returns true if one exists, false otherwise.
    On success, sets *INODE to an inode for the file, otherwise to
    a null pointer.  The caller must close *INODE. */
+// "返回"一个打开的inode, 指向找到的文件
 bool
 dir_lookup (const struct dir *dir, const char *name,
             struct inode **inode) 
@@ -125,6 +135,7 @@ dir_lookup (const struct dir *dir, const char *name,
   ASSERT (name != NULL);
 
   if (lookup (dir, name, &e, NULL))
+    // 打开的是dir_entry指向的文件的inode, 而非指向dir的inode!
     *inode = inode_open (e.inode_sector);
   else
     *inode = NULL;
@@ -163,12 +174,14 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
      inode_read_at() will only return a short read at end of file.
      Otherwise, we'd need to verify that we didn't get a short
      read due to something intermittent such as low memory. */
+  // 将offset更新到下一个空闲的slot (尚未被使用的dir_entry空位)
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
        ofs += sizeof e) 
     if (!e.in_use)
       break;
 
   /* Write slot. */
+  // 如果inode写入失败了, 怎么回收entry的数据?
   e.in_use = true;
   strlcpy (e.name, name, sizeof e.name);
   e.inode_sector = inode_sector;
@@ -181,6 +194,8 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 /* Removes any entry for NAME in DIR.
    Returns true if successful, false on failure,
    which occurs only if there is no file with the given NAME. */
+// 从目录中移除一个文件, 先找到文件, 再打开文件对应的inode, 销毁文件inode中的内容
+// 再销毁dir_entry ("销毁"指的是将in_use位置低后写回文件)
 bool
 dir_remove (struct dir *dir, const char *name) 
 {
@@ -202,6 +217,7 @@ dir_remove (struct dir *dir, const char *name)
     goto done;
 
   /* Erase directory entry. */
+  // 将in_use位置低后写回文件
   e.in_use = false;
   if (inode_write_at (dir->inode, &e, sizeof e, ofs) != sizeof e) 
     goto done;
@@ -218,6 +234,8 @@ dir_remove (struct dir *dir, const char *name)
 /* Reads the next directory entry in DIR and stores the name in
    NAME.  Returns true if successful, false if the directory
    contains no more entries. */
+// 获得dir中下一个文件的名字, 手动更新dir的offset
+// 除了此处和dir_open(), 不准在其他地方修改dir->pos!
 bool
 dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
 {

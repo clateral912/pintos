@@ -8,6 +8,7 @@
 #include "directory.h"
 
 /* Partition that contains the file system. */
+// 指向存有filesystem的块设备
 struct block *fs_device;
 
 static void do_format (void);
@@ -32,12 +33,14 @@ filesys_init (bool format)
 
 /* Shuts down the file system module, writing any unwritten data
    to disk. */
+// TODO: 在此处加上把Cache中的数据写回磁盘的操作
 void
 filesys_done (void) 
 {
   free_map_close ();
 }
 
+// 注意! 现在的open close remove操作都只在根目录下进行!
 /* Creates a file named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
@@ -91,6 +94,7 @@ filesys_remove (const char *name)
 }
 
 /* Formats the file system. */
+// 格式化
 static void
 do_format (void)
 {

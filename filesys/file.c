@@ -7,6 +7,7 @@
 /* Opens a file for the given INODE, of which it takes ownership,
    and returns the new file.  Returns a null pointer if an
    allocation fails or if INODE is null. */
+// 新建一个文件对象, 为其分配内存, 设定inode并初始化pos
 struct file *
 file_open (struct inode *inode) 
 {
@@ -40,6 +41,7 @@ file_close (struct file *file)
 {
   if (file != NULL)
     {
+      // 为什么这里需要allow write? 不理解
       file_allow_write (file);
       inode_close (file->inode);
       free (file); 
@@ -58,6 +60,8 @@ file_get_inode (struct file *file)
    Returns the number of bytes actually read,
    which may be less than SIZE if end of file is reached.
    Advances FILE's position by the number of bytes read. */
+// 读取文件数据并自动更新当前file的position, read_bytes有可能
+// 不等于size!
 off_t
 file_read (struct file *file, void *buffer, off_t size) 
 {
@@ -71,6 +75,8 @@ file_read (struct file *file, void *buffer, off_t size)
    Returns the number of bytes actually read,
    which may be less than SIZE if end of file is reached.
    The file's current position is unaffected. */
+// 注意! file_read_at()并不会修改file的position !!!
+// 与file_read()的区别是从给定的offset开始读取
 off_t
 file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs) 
 {
@@ -84,6 +90,7 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
    (Normally we'd grow the file in that case, but file growth is
    not yet implemented.)
    Advances FILE's position by the number of bytes read. */
+// TODO: 要在这里实现文件增长
 off_t
 file_write (struct file *file, const void *buffer, off_t size) 
 {
@@ -99,6 +106,7 @@ file_write (struct file *file, const void *buffer, off_t size)
    (Normally we'd grow the file in that case, but file growth is
    not yet implemented.)
    The file's current position is unaffected. */
+// 同样, 不影响file的position
 off_t
 file_write_at (struct file *file, const void *buffer, off_t size,
                off_t file_ofs) 
@@ -108,6 +116,7 @@ file_write_at (struct file *file, const void *buffer, off_t size,
 
 /* Prevents write operations on FILE's underlying inode
    until file_allow_write() is called or FILE is closed. */
+// 在inode层面阻止写入
 void
 file_deny_write (struct file *file) 
 {
@@ -122,6 +131,10 @@ file_deny_write (struct file *file)
 /* Re-enables write operations on FILE's underlying inode.
    (Writes might still be denied by some other file that has the
    same inode open.) */
+// 注意!!!! 在使用该函数后还有可能不能写入文件!!
+// 因为其他进程也对该文件设置了deny write!
+// 只有当所有拥有指向该inode的文件的进程, 释放了写入权限后
+// 文件才能重新被写入!
 void
 file_allow_write (struct file *file) 
 {

@@ -1,28 +1,19 @@
-#include "filesys/inode.h"
+#include "inode.h"
 #include <list.h>
 #include <debug.h>
 #include <round.h>
 #include <string.h>
-#include "filesys/filesys.h"
-#include "filesys/free-map.h"
-#include "threads/malloc.h"
-#include "threads/thread.h"
+#include "filesys.h"
+#include "free-map.h"
+#include "../threads/malloc.h"
+#include "../threads/thread.h"
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
-/* On-disk inode.
-   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
-struct inode_disk
-  {
-    block_sector_t start;               /* First data sector. */
-    off_t length;                       /* File size in bytes. */
-    unsigned magic;                     /* Magic number. */
-    uint32_t unused[125];               /* Not used. */
-  };
-
 /* Returns the number of sectors to allocate for an inode SIZE
    bytes long. */
+// 返回存储size各byte需要几个sector
 static inline size_t
 bytes_to_sectors (off_t size)
 {
@@ -44,6 +35,7 @@ struct inode
    within INODE.
    Returns -1 if INODE does not contain data for a byte at offset
    POS. */
+// 返回file中pos位置所在的扇区编号
 static block_sector_t
 byte_to_sector (const struct inode *inode, off_t pos) 
 {
@@ -80,17 +72,23 @@ inode_create (block_sector_t sector, off_t length)
 
   /* If this assertion fails, the inode structure is not exactly
      one sector in size, and you should fix that. */
+  // 为什么disk_inode要用calloc()而不是局部变量?
+  // 因为此处要检查disk_inode的大小! (真的吗? 所以为啥不用局部变量?)
   ASSERT (sizeof *disk_inode == BLOCK_SECTOR_SIZE);
-
+  // 使用calloc的原因是我们需要将分配的内存空间初始化为0
   disk_inode = calloc (1, sizeof *disk_inode);
   if (disk_inode != NULL)
     {
+      // 初始化disk_inode的数据
       size_t sectors = bytes_to_sectors (length);
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
+      // 为inode元数据分配扇区, free_map_allocate()中修改了inode的start位置
       if (free_map_allocate (sectors, &disk_inode->start)) 
         {
+          // 将inode数据写入到磁盘中
           block_write (fs_device, sector, disk_inode);
+          // 将inode指向的数据区块全部设置为0
           if (sectors > 0) 
             {
               static char zeros[BLOCK_SECTOR_SIZE];
@@ -101,6 +99,8 @@ inode_create (block_sector_t sector, off_t length)
             }
           success = true; 
         } 
+      // 此时, disk_inode中的数据已经写入到了磁盘中,
+      // 我们不再需要内存中的disk_inode了! 将其释放
       free (disk_inode);
     }
   return success;
@@ -116,12 +116,15 @@ inode_open (block_sector_t sector)
   struct inode *inode;
   struct thread *cur = thread_current();
   /* Check whether this inode is already open. */
+  // 检查要打开的inode是否已经被打开过了
   for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
        e = list_next (e)) 
     {
       inode = list_entry (e, struct inode, elem);
       if (inode->sector == sector) 
         {
+          // 违规的start值一定是其他进程尚未读取的
+          // 让出CPU让其他进程执行完毕
           while(inode->data.start == 0xcccccccc)
           {
             thread_yield();
@@ -156,6 +159,8 @@ inode_reopen (struct inode *inode)
 }
 
 /* Returns INODE's inode number. */
+// PintOS的inode_number就是扇区号!
+// 无论在哪个目录下, 扇区号在整个系统中都是唯一的!
 block_sector_t
 inode_get_inumber (const struct inode *inode)
 {
@@ -173,6 +178,7 @@ inode_close (struct inode *inode)
     return;
 
   /* Release resources if this was the last opener. */
+  // 如果引用计数为0, 那么关闭文件
   if (--inode->open_cnt == 0)
     {
       /* Remove from inode list and release lock. */
@@ -181,17 +187,19 @@ inode_close (struct inode *inode)
       /* Deallocate blocks if removed. */
       if (inode->removed) 
         {
+          // 先free这个inode本身存储的扇区(free元数据)
           free_map_release (inode->sector, 1);
+          // 再free整个文件的内容
           free_map_release (inode->data.start,
                             bytes_to_sectors (inode->data.length)); 
         }
-
       free (inode); 
     }
 }
 
 /* Marks INODE to be deleted when it is closed by the last caller who
    has it open. */
+// 只是简单的设置removed为true
 void
 inode_remove (struct inode *inode) 
 {
@@ -212,10 +220,16 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   while (size > 0) 
     {
       /* Disk sector to read, starting byte offset within sector. */
+      // 先获取数据所在的扇区
       block_sector_t sector_idx = byte_to_sector (inode, offset);
+      // 取余数
+      // 获取offset所在的位置对应的扇区offset
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
+      // 获取扇区剩余空间和文件剩余长度中的较小值
+      // 因为我们每次循环才更新扇区号, 如果读取超过sector_left个字节会引发错误
+      // 如果不对file_left加以限制, 那么可能会读取到超出文件的内容(EOF之后)
       off_t inode_left = inode_length (inode) - offset;
       int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
       int min_left = inode_left < sector_left ? inode_left : sector_left;
@@ -225,6 +239,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       if (chunk_size <= 0)
         break;
 
+      // 如果offset所处的位置恰好在sector的开头且要读得数据长度恰好为BLOCK_SECTOR_SIZES
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Read full sector directly into caller's buffer. */
@@ -234,6 +249,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
         {
           /* Read sector into bounce buffer, then partially copy
              into caller's buffer. */
+          // 暂时将一整个扇区的内容写入到bounce缓冲区中
           if (bounce == NULL) 
             {
               bounce = malloc (BLOCK_SECTOR_SIZE);
@@ -241,6 +257,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
                 break;
             }
           block_read (fs_device, sector_idx, bounce);
+          //根据文件的实际长度信息, 将bounce中的内容拷贝到目标buffer中
           memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
         }
       
@@ -249,6 +266,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       offset += chunk_size;
       bytes_read += chunk_size;
     }
+  // 为什么malloc了许多次, 只需要free一次???不会内存泄漏吗?
   free (bounce);
 
   return bytes_read;
@@ -304,6 +322,9 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
           /* If the sector contains data before or after the chunk
              we're writing, then we need to read in the sector
              first.  Otherwise we start with a sector of all zeros. */
+          // 如果这个扇区中除了我们需要的文件还有其他的内容
+          // 那么我们需要在文件写入前将原有的数据保存备份一份
+          // 避免一次写入造成扇区中的部分数据丢失
           if (sector_ofs > 0 || chunk_size < sector_left) 
             block_read (fs_device, sector_idx, bounce);
           else
