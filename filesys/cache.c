@@ -186,7 +186,9 @@ cache_fill(block_sector_t disk_sector, bool is_inode, bool if_read)
     centry->cache_addr      = cnode->addr;
     //向cache中写入数据
     memcpy(cnode->addr, buffer, BLOCK_SECTOR_SIZE);
-    list_push_back(&cache_list, &cnode->elem);
+    // 只有当cache满时我们才将新的cnode压入list中
+    if (!cache_full())
+      list_push_back(&cache_list, &cnode->elem);
   }
   hash_insert(&cache_hashmap, &centry->helem);
   //debug only
@@ -220,8 +222,6 @@ cache_writeback_all(void)
     cnode = list_entry(e, struct cache_sector_node, elem);
     if (!cnode->is_inode_sector)
       cache_writeback(cnode);
-    if (cnt++ >= CACHE_SIZE)
-      break;
   }
 }
 

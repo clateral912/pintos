@@ -9,6 +9,12 @@
 #include "../filesys/filesys.h"
 #include "../filesys/file.h"
 
+
+/* Random value for struct thread's `magic' member.
+   Used to detect stack overflow.  See the big comment at the top
+   of thread.h for details. */
+#define THREAD_MAGIC 0xcd6abf4b
+
 /* States in a thread's life cycle. */
 enum thread_status
   {

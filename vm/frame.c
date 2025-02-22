@@ -111,7 +111,11 @@ frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
       page_idx = swap_in(kpage);
   
   // 将此页的"Present"标志位清零, 确保下一次进程访问该页面时会发生Page Fault
-  pagedir_clear_page(t->pagedir, upage);
+  // IMPORTANT 如果线程t已经死亡, 那么我们不能访问它的pagedir!
+  // 使用magic监测进程是否已经被清理
+  if (t->magic == THREAD_MAGIC)
+    pagedir_clear_page(t->pagedir, upage);
+
   pnode->swap_pg_idx  = page_idx;
   pnode->loc          = pnode->role == SEG_MMAP ? LOC_FILE : LOC_SWAP;
   pnode->frame_node   = NULL;

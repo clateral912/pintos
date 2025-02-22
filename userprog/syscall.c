@@ -308,11 +308,20 @@ syscall_exit(struct intr_frame *f, int status_)
     //将sema指针暂时存起来, 当thread_exit后, cur指针将不再可用
     sema = &cur->pwait_node->sema;
   }
- 
-  // 打印Process Termination Messages
-  printf("%s: exit(%d)\n", cur->name, status);
+
+  //释放进程持有的资源, 包括pagelist和mmap以及fd_list
+  page_mmap_unmap_all(cur);
+  page_destroy_pagelist(cur);
+  process_destroy_fd_list(cur);
+  
+  // 恢复当前进程可执行文件的可修改性
+  if (cur->exec_file != NULL)
+    file_close(cur->exec_file);
+
   //刷新filesys的缓存
   cache_writeback_all();
+  // 打印Process Termination Messages
+  printf("%s: exit(%d)\n", cur->name, status);
 
   if (sema != NULL)
     sema_up(sema);

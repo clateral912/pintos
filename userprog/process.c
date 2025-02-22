@@ -337,14 +337,6 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  page_mmap_unmap_all(cur);
-  page_destroy_pagelist(cur);
-  process_destroy_fd_list(cur);
-  // 恢复当前进程可执行文件的可修改性
-  if (cur->exec_file != NULL)
-  {
-    file_close(cur->exec_file);
-  }
     /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
