@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include "cache.h"
 #include "file.h"
 #include "free-map.h"
 #include "inode.h"
@@ -29,6 +30,7 @@ filesys_init (bool format)
     do_format ();
 
   free_map_open ();
+  cache_init();
 }
 
 /* Shuts down the file system module, writing any unwritten data
@@ -37,6 +39,7 @@ filesys_init (bool format)
 void
 filesys_done (void) 
 {
+  cache_writeback_all();
   free_map_close ();
 }
 

@@ -5,6 +5,7 @@
 #include <string.h>
 #include "filesys.h"
 #include "free-map.h"
+#include "cache.h"
 #include "../threads/malloc.h"
 #include "../threads/thread.h"
 

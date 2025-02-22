@@ -8,7 +8,6 @@
 #include "../threads/vaddr.h"
 #include "../devices/block.h"
 #include "filesys.h"
-#include "inode.h"
 #include "off_t.h"
 #include "stdbool.h"
 
@@ -50,7 +49,8 @@ struct hash cache_hashmap;
 struct list cache_list;
 struct list_elem *clist_ptr;
 
-struct cache_sector_node *cache_evict();
+static struct cache_sector_node *cache_evict();
+static struct cache_sector_node *cache_get_free_sector(bool is_inode);
 
 bool cache_hash_less(const struct hash_elem *h1, const struct hash_elem *h2, void *aux UNUSED)
 {
@@ -66,24 +66,24 @@ unsigned cache_hash_hash(const struct hash_elem *helem, void *aux UNUSED)
 }
 
 void
-cache_init()
+cache_init(void)
 {
   list_init(&cache_list);
   hash_init(&cache_hashmap, cache_hash_hash, cache_hash_less, NULL);
-  free_inode_sector = calloc(1, BLOCK_SECTOR_SIZE);
+  free_inode_sector = cache_get_free_sector(true);
   clist_ptr = list_end(&cache_list);
   cache = palloc_get_multiple(PAL_ZERO, ((CACHE_SIZE * BLOCK_SECTOR_SIZE) / PGSIZE));
   if (cache == NULL)
     PANIC("cache_init(): Cannot allocate memory for cache");
 }
 
-inline bool 
+inline static bool 
 cache_full()
 {
-  return cache_sectors_cnt >= 64;
+  return cache_sectors_cnt >= CACHE_SIZE;
 }
 
-struct cache_entry *
+static struct cache_entry *
 cache_seek(block_sector_t sector)
 {
   struct cache_entry key_entry;
@@ -96,16 +96,39 @@ cache_seek(block_sector_t sector)
   return hash_entry(helem, struct cache_entry, helem);
 }
 
+// 返回一个可用的cnode节点
+static struct cache_sector_node *
+cache_get_free_sector(bool is_inode)
+{
+  struct cache_sector_node *cnode; 
+  uint8_t sector_idx;
+  if (!cache_full())
+    {
+      cnode = calloc(1, sizeof(struct cache_sector_node));
+      sector_idx = ++cache_sectors_cnt;
+    }
+  else
+    cnode = cache_evict();
+
+  ASSERT(cnode != NULL);
+  cnode->is_inode_sector  = is_inode;
+  cnode->addr             = cnode->addr == NULL ? cache + sector_idx * BLOCK_SECTOR_SIZE : cnode->addr;
+  cnode->centry           = NULL;
+  cnode->cache_idx        = sector_idx;
+
+  return cnode;
+}
 
 //向某个存储inode元数据的cache_sector中添加inode元数据
-void *
+static void *
 cache_add_inode(struct inode_cache_entry *inode_entry, struct cache_entry *centry)
 {
-  if (free_inode_sector->inode_entry_cnt == 64)
-    free_inode_sector = cache_evict();
+  // 如果当前存储inode的sector已满
+  if (free_inode_sector->inode_entry_cnt == BLOCK_SECTOR_SIZE / sizeof(struct inode_cache_entry))
+    free_inode_sector = cache_get_free_sector(true);
 
   free_inode_sector->inode_entry_cnt++;
-  free_inode_sector->centry = NULL;  //用SIZE_MAX表示其没有对应的物理磁盘sector
+  free_inode_sector->centry = NULL;  
   void *addr = free_inode_sector->addr + free_inode_sector->inode_entry_cnt * sizeof(struct inode_cache_entry);
   // 向addr中写入inode_entry的内容
   free_inode_sector->inode_helem[free_inode_sector->inode_entry_cnt - 1] = &centry->helem;
@@ -116,7 +139,7 @@ cache_add_inode(struct inode_cache_entry *inode_entry, struct cache_entry *centr
 
 // 从磁盘中读入数据到cache中, 返回已经写入内存的文件内容的内存地址
 // 若if_read为true, 则从磁盘中读取数据
-void *
+static void *
 cache_fill(block_sector_t disk_sector, bool is_inode, bool if_read)
 {
   void *buffer = calloc(1, BLOCK_SECTOR_SIZE);
@@ -124,6 +147,7 @@ cache_fill(block_sector_t disk_sector, bool is_inode, bool if_read)
     block_read(fs_device, disk_sector, buffer);
 
   struct cache_entry *centry = calloc(1, sizeof(struct cache_entry));
+  ASSERT(centry != NULL);
 
   if (is_inode)
   {
@@ -134,21 +158,7 @@ cache_fill(block_sector_t disk_sector, bool is_inode, bool if_read)
   }
   else 
   {
-    uint8_t sector_idx;
-    struct cache_sector_node *cnode; 
-    
-    if (!cache_full())
-    {
-      cnode = calloc(1, sizeof(struct cache_sector_node));
-      sector_idx = ++cache_sectors_cnt;
-    }
-    else
-      cnode = cache_evict();
-
-    cnode->is_inode_sector  = false;
-    cnode->addr             = cnode->addr == NULL ? cache + sector_idx * BLOCK_SECTOR_SIZE : cnode->addr;
-    cnode->centry           = centry;
-    cnode->cache_idx        = sector_idx;
+    struct cache_sector_node *cnode = cache_get_free_sector(false);
     centry->is_inode        = false;
     centry->sector          = disk_sector;
     centry->cache_addr      = cnode->addr;
@@ -163,7 +173,7 @@ cache_fill(block_sector_t disk_sector, bool is_inode, bool if_read)
 }
 
 //将cache中某个sector的内容写回
-void
+static void
 cache_writeback(struct cache_sector_node *cnode)
 {
   // 保证cnode指向的一定是一个存储正常文件数据的sector, 而不是存储inode的
@@ -172,7 +182,7 @@ cache_writeback(struct cache_sector_node *cnode)
 }
 
 void
-cache_writeback_all()
+cache_writeback_all(void)
 {
   struct list_elem *e;
   struct cache_sector_node *cnode;
@@ -216,6 +226,8 @@ cache_write(block_sector_t disk_sector, const void *buffer, bool is_inode)
 {
   void *cache_addr;
   struct cache_entry *centry = cache_seek(disk_sector);
+  ASSERT(centry != NULL);
+  ASSERT(centry->cnode != NULL);
   if (centry == NULL)
     cache_addr = cache_fill(disk_sector, is_inode, false);
   else
@@ -230,7 +242,7 @@ cache_write(block_sector_t disk_sector, const void *buffer, bool is_inode)
   centry->cnode->dirty    = true; 
 }
 
-struct cache_sector_node *
+static struct cache_sector_node *
 cache_which_to_evict()
 {
   ASSERT(cache_full());
@@ -246,7 +258,6 @@ cache_which_to_evict()
       clist_ptr = list_begin(&cache_list);
     
     cnode = list_entry(clist_ptr, struct cache_sector_node, elem);
-
     bool accessed = cnode->accessed;
     bool dirty    = cnode->dirty;
     
@@ -257,6 +268,7 @@ cache_which_to_evict()
     {
       if (!accessed && !dirty)
       {
+        // 每次驱逐后应该更新指针
         clist_ptr = list_next(clist_ptr);
         return cnode;
       }
@@ -273,7 +285,7 @@ cache_which_to_evict()
   }
 }
 
-struct cache_sector_node *
+static struct cache_sector_node *
 cache_evict()
 {
   struct cache_sector_node *cnode = cache_which_to_evict();
