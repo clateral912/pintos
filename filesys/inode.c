@@ -8,6 +8,7 @@
 #include "cache.h"
 #include "../threads/malloc.h"
 #include "../threads/thread.h"
+#include "stdbool.h"
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
@@ -29,7 +30,6 @@ struct inode
     int open_cnt;                       /* Number of openers. */
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
-    struct inode_disk data;             /* Inode content. */
   };
 
 /* Returns the block device sector that contains byte offset POS
@@ -41,8 +41,9 @@ static block_sector_t
 byte_to_sector (const struct inode *inode, off_t pos) 
 {
   ASSERT (inode != NULL);
-  if (pos < inode->data.length)
-    return inode->data.start + pos / BLOCK_SECTOR_SIZE;
+  struct inode_disk *data = cache_find_inode(inode->sector);
+  if (pos < data->length)
+    return data->start + pos / BLOCK_SECTOR_SIZE;
   else
     return -1;
 }
@@ -88,7 +89,7 @@ inode_create (block_sector_t sector, off_t length)
       if (free_map_allocate (sectors, &disk_inode->start)) 
         {
           // 将inode数据写入到磁盘中
-          block_write (fs_device, sector, disk_inode);
+          cache_write (sector, disk_inode, true);
           // 将inode指向的数据区块全部设置为0
           if (sectors > 0) 
             {
@@ -96,7 +97,7 @@ inode_create (block_sector_t sector, off_t length)
               size_t i;
               
               for (i = 0; i < sectors; i++) 
-                block_write (fs_device, disk_inode->start + i, zeros);
+                cache_write (disk_inode->start + i, zeros, false);
             }
           success = true; 
         } 
@@ -124,12 +125,12 @@ inode_open (block_sector_t sector)
       inode = list_entry (e, struct inode, elem);
       if (inode->sector == sector) 
         {
+          struct inode_disk *data = cache_find_inode(inode->sector);
           // 违规的start值一定是其他进程尚未读取的
           // 让出CPU让其他进程执行完毕
-          while(inode->data.start == 0xcccccccc)
-          {
+          while(data->start == 0xcccccccc)
             thread_yield();
-          }
+
           inode_reopen (inode);
           return inode; 
         }
@@ -142,11 +143,14 @@ inode_open (block_sector_t sector)
 
   /* Initialize. */
   list_push_front (&open_inodes, &inode->elem);
+
+  struct inode_disk *data = calloc(1, sizeof(struct inode_disk));
   inode->sector = sector;
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
-  block_read (fs_device, inode->sector, &inode->data);
+  cache_read(inode->sector, data, true);
+  // block_read (fs_device, inode->sector, &inode->data);
   return inode;
 }
 
@@ -184,15 +188,15 @@ inode_close (struct inode *inode)
     {
       /* Remove from inode list and release lock. */
       list_remove (&inode->elem);
- 
       /* Deallocate blocks if removed. */
       if (inode->removed) 
         {
+          struct inode_disk *data = cache_find_inode(inode->sector);
           // 先free这个inode本身存储的扇区(free元数据)
           free_map_release (inode->sector, 1);
           // 再free整个文件的内容
-          free_map_release (inode->data.start,
-                            bytes_to_sectors (inode->data.length)); 
+          free_map_release (data->start,
+                            bytes_to_sectors (data->length)); 
         }
       free (inode); 
     }
@@ -244,7 +248,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Read full sector directly into caller's buffer. */
-          block_read (fs_device, sector_idx, buffer + bytes_read);
+          cache_read(sector_idx, buffer + bytes_read, false);
         }
       else 
         {
@@ -257,7 +261,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
               if (bounce == NULL)
                 break;
             }
-          block_read (fs_device, sector_idx, bounce);
+          cache_read (sector_idx, bounce, false);
           //根据文件的实际长度信息, 将bounce中的内容拷贝到目标buffer中
           memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
         }
@@ -268,6 +272,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       bytes_read += chunk_size;
     }
   // 为什么malloc了许多次, 只需要free一次???不会内存泄漏吗?
+  // Answer: 上面那个else部分在所有循环中只会执行一次, 是读取每个文件最末尾的部分!
   free (bounce);
 
   return bytes_read;
@@ -308,7 +313,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Write full sector directly to disk. */
-          block_write (fs_device, sector_idx, buffer + bytes_written);
+          cache_write (sector_idx, buffer + bytes_written, false);
         }
       else 
         {
@@ -327,11 +332,11 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
           // 那么我们需要在文件写入前将原有的数据保存备份一份
           // 避免一次写入造成扇区中的部分数据丢失
           if (sector_ofs > 0 || chunk_size < sector_left) 
-            block_read (fs_device, sector_idx, bounce);
+            cache_read (sector_idx, bounce, false);
           else
             memset (bounce, 0, BLOCK_SECTOR_SIZE);
           memcpy (bounce + sector_ofs, buffer + bytes_written, chunk_size);
-          block_write (fs_device, sector_idx, bounce);
+          cache_write (sector_idx, bounce, false);
         }
 
       /* Advance. */
@@ -368,5 +373,6 @@ inode_allow_write (struct inode *inode)
 off_t
 inode_length (const struct inode *inode)
 {
-  return inode->data.length;
+  struct inode_disk *data = cache_find_inode(inode->sector);
+  return data->length;
 }
