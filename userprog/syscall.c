@@ -10,6 +10,7 @@
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
 #include "../filesys/filesys.h"
+#include "../filesys/cache.h"
 #include "../vm/frame.h"
 #include "../vm/page.h"
 #include "../vm/virtual-memory.h"
@@ -310,6 +311,8 @@ syscall_exit(struct intr_frame *f, int status_)
  
   // 打印Process Termination Messages
   printf("%s: exit(%d)\n", cur->name, status);
+  //刷新filesys的缓存
+  cache_writeback_all();
 
   if (sema != NULL)
     sema_up(sema);

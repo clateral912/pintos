@@ -213,12 +213,15 @@ cache_writeback_all(void)
 {
   struct list_elem *e;
   struct cache_sector_node *cnode;
+  uint8_t cnt = 0;
 
-  for (e = list_begin(&cache_list); e != list_end(&cache_list);)
+  for (e = list_begin(&cache_list); e != list_end(&cache_list); e = list_next(e))
   {
     cnode = list_entry(e, struct cache_sector_node, elem);
-    e = list_next(e);
-    cache_writeback(cnode);
+    if (!cnode->is_inode_sector)
+      cache_writeback(cnode);
+    if (cnt++ >= CACHE_SIZE)
+      break;
   }
 }
 
@@ -231,7 +234,7 @@ cache_read(block_sector_t disk_sector, void *buffer, bool is_inode)
   void *cache_addr;
   struct cache_entry *centry = cache_seek(disk_sector);
   if (centry == NULL)
-    centry = cache_fill(disk_sector, is_inode, false);
+    centry = cache_fill(disk_sector, is_inode, true);
 
   centry->cnode->accessed = true;
   cache_addr = centry->cache_addr;

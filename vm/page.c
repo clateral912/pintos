@@ -5,6 +5,7 @@
 #include "../threads/malloc.h"
 #include "../filesys/file.h"
 #include "../filesys/filesys.h"
+#include "../filesys/cache.h"
 #include "../threads/palloc.h"
 #include "../threads/synch.h"
 #include "../userprog/pagedir.h"
@@ -587,6 +588,7 @@ page_mmap_unmap_all(struct thread *t)
     e = list_next(e);
     page_mmap_unmap(t, mnode->mapid);
   }
+  cache_writeback_all();
 }
 
 void
