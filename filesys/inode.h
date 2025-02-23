@@ -5,6 +5,8 @@
 #include "off_t.h"
 #include "../devices/block.h"
 
+#define DIRECT_BLOCKS 5
+#define INDIRECT_BLOCKS 128
 struct bitmap;
 
 
@@ -12,10 +14,12 @@ struct bitmap;
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
   {
-    block_sector_t start;               /* First data sector. */
     off_t length;                       /* File size in bytes. */
+    block_sector_t direct[DIRECT_BLOCKS];               /* First data sector. */
+    block_sector_t indirect;
+    block_sector_t double_indirect;
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[125];               /* Not used. */
+    uint32_t unused[476];               /* Not used. */
   };
 
 void inode_init (void);
@@ -23,6 +27,7 @@ bool inode_create (block_sector_t, off_t);
 struct inode *inode_open (block_sector_t);
 struct inode *inode_reopen (struct inode *);
 block_sector_t inode_get_inumber (const struct inode *);
+block_sector_t byte_to_sector (const struct inode *inode, off_t pos);
 void inode_close (struct inode *);
 void inode_remove (struct inode *);
 off_t inode_read_at (struct inode *, void *, off_t size, off_t offset);

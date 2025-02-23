@@ -37,7 +37,7 @@ struct inode
    Returns -1 if INODE does not contain data for a byte at offset
    POS. */
 // 返回file中pos位置所在的扇区编号
-static block_sector_t
+block_sector_t
 byte_to_sector (const struct inode *inode, off_t pos) 
 {
   ASSERT (inode != NULL);

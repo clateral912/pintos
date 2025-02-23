@@ -17,8 +17,10 @@
 
 struct inode_cache_entry
 {
-  block_sector_t start;
-  off_t length;
+    off_t length;                       
+    block_sector_t direct[5];               
+    block_sector_t indirect;
+    block_sector_t double_indirect;
 };
 
 struct cache_sector_node
@@ -194,8 +196,6 @@ cache_fill(block_sector_t disk_sector, bool is_inode, bool if_read)
       list_push_back(&cache_list, &cnode->elem);
   }
   hash_insert(&cache_hashmap, &centry->helem);
-  //debug only
-  // ASSERT(centry->helem.list_elem.prev != NULL);
   free(buffer);
   // TODO: 添加返回false的情况!
   return centry;
@@ -228,7 +228,6 @@ cache_writeback_all(void)
       cache_writeback(cnode);
   }
   lock_release(&cache_lock);
-  // printf("Finished cache writeback all!\n");
 }
 
 // 从cache中读取某块数据
