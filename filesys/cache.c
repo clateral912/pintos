@@ -5,6 +5,7 @@
 #include <string.h>
 #include "../threads/malloc.h"
 #include "../threads/palloc.h"
+#include "../threads/synch.h"
 #include "../threads/vaddr.h"
 #include "../devices/block.h"
 #include "filesys.h"
@@ -45,6 +46,7 @@ struct cache_entry
 
 void *cache;
 uint8_t cache_sectors_cnt;
+struct lock cache_lock;
 struct cache_sector_node *free_inode_sector;
 struct hash cache_hashmap;
 struct list cache_list;
@@ -71,6 +73,7 @@ void
 cache_init(void)
 {
   list_init(&cache_list);
+  lock_init(&cache_lock);
   hash_init(&cache_hashmap, cache_hash_hash, cache_hash_less, NULL);
   clist_ptr = list_end(&cache_list);
   cache = palloc_get_multiple(PAL_ZERO, ((CACHE_SIZE * BLOCK_SECTOR_SIZE) / PGSIZE));
@@ -217,12 +220,14 @@ cache_writeback_all(void)
   struct cache_sector_node *cnode;
   uint8_t cnt = 0;
 
+  lock_acquire(&cache_lock);
   for (e = list_begin(&cache_list); e != list_end(&cache_list); e = list_next(e))
   {
     cnode = list_entry(e, struct cache_sector_node, elem);
     if (!cnode->is_inode_sector)
       cache_writeback(cnode);
   }
+  lock_release(&cache_lock);
   // printf("Finished cache writeback all!\n");
 }
 
@@ -325,6 +330,7 @@ cache_evict()
 {
   struct cache_sector_node *cnode = cache_which_to_evict();
   
+  lock_acquire(&cache_lock);
   if(cnode->dirty && !cnode->is_inode_sector)
     cache_writeback(cnode);
 
@@ -352,6 +358,7 @@ cache_evict()
     cnode->inode_entry_cnt = 0;
     memset(cnode->inode_helem, 0, sizeof(cnode->inode_helem));
   }
+  lock_release(&cache_lock);
   
   return cnode;
 }

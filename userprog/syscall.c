@@ -310,6 +310,7 @@ syscall_exit(struct intr_frame *f, int status_)
     sema = &cur->pwait_node->sema;
   }
 
+  // TODO: 释放进程持有的所有锁！
   //释放进程持有的资源, 包括pagelist和mmap以及fd_list
   cache_writeback_all();
   page_mmap_unmap_all(cur);
