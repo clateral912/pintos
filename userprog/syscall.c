@@ -193,6 +193,7 @@ syscall_close(struct intr_frame *f)
 
   file_close(file); 
   process_remove_fd_node(cur, fd);
+  cache_writeback_all();
 }
 
 static void
@@ -310,6 +311,7 @@ syscall_exit(struct intr_frame *f, int status_)
   }
 
   //释放进程持有的资源, 包括pagelist和mmap以及fd_list
+  cache_writeback_all();
   page_mmap_unmap_all(cur);
   page_destroy_pagelist(cur);
   process_destroy_fd_list(cur);
@@ -319,7 +321,6 @@ syscall_exit(struct intr_frame *f, int status_)
     file_close(cur->exec_file);
 
   //刷新filesys的缓存
-  cache_writeback_all();
   // 打印Process Termination Messages
   printf("%s: exit(%d)\n", cur->name, status);
 

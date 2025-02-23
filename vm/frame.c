@@ -16,11 +16,13 @@
 
 struct list frame_list;
 struct list_elem *flist_ptr;
+struct lock flist_lock;
 uint32_t frame_cnt;
 
 void frame_init()
 {
   list_init(&frame_list);
+  lock_init(&flist_lock);
   flist_ptr = list_begin(&frame_list);
   frame_cnt = 0;
 }
@@ -102,14 +104,13 @@ frame_swap(struct thread *t, struct frame_node *fnode, bool dirty)
   size_t page_idx = SIZE_MAX;
 
   // 如果页面是脏页, 那么需要写回到文件或磁盘中
-    if (pnode->role == SEG_MMAP)
-    {
-      struct mmap_vma_node *mnode = page_mmap_seek(t, USE_ADDR, upage);
-      page_mmap_writeback(t, mnode->mapid);
-    } 
-    else
-      page_idx = swap_in(kpage);
-  
+  if (pnode->role == SEG_MMAP)
+  {
+    struct mmap_vma_node *mnode = page_mmap_seek(t, USE_ADDR, upage);
+    page_mmap_writeback(t, mnode->mapid);
+  } 
+  else
+    page_idx = swap_in(kpage);
   // 将此页的"Present"标志位清零, 确保下一次进程访问该页面时会发生Page Fault
   // IMPORTANT 如果线程t已经死亡, 那么我们不能访问它的pagedir!
   // 使用magic监测进程是否已经被清理
@@ -138,6 +139,7 @@ frame_evict(uint32_t flags)
 
   struct list_elem *old_ptr = flist_ptr;
   
+  lock_acquire(&flist_lock);
   for (;;)
   {
     // 我们的链表是有头尾节点的, 头尾节点是不在任何node中的
@@ -164,13 +166,14 @@ frame_evict(uint32_t flags)
 
     if (fnode->evictable && writable)
     {
-      if (!second_turn)
+        if (!second_turn)
       {
         // 第一次轮询, 我们不修改access位
         if (!accessed && !dirty)
         {
           frame_swap(t, fnode, dirty);
           fnode->evictable = evictable;
+          lock_release(&flist_lock);
           return fnode;
         }
       }
@@ -182,6 +185,7 @@ frame_evict(uint32_t flags)
         {
           frame_swap(t, fnode, dirty);
           fnode->evictable = evictable;
+          lock_release(&flist_lock);
           return fnode;
         }
         // 将access位设置为false

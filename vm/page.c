@@ -247,8 +247,10 @@ page_destroy_pagelist(struct thread *t)
   //摧毁前传入辅助参数: 线程句柄
   process->page_list.aux = t;
 
+  lock_acquire(&flist_lock);
   //摧毁该进程持有的pagelist
   hash_destroy(&process->page_list, page_page_destructor);
+  lock_release(&flist_lock);
 
   // 在process_list中删除该process
   lock_acquire(&process_list_lock);
@@ -269,6 +271,9 @@ page_assign_frame(struct thread *t, struct page_node *pnode, struct frame_node *
   void *upage = pnode->upage;
 
   // pagedir_set_page中分配了upage的PTE并创建其所在的页表
+  if (pg_ofs(fnode->kaddr) != 0)
+    printf("Bug Occurs!\n");
+
   bool success = pagedir_set_page(t->pagedir, upage, fnode->kaddr, writable);
   if (!success)
   {

@@ -184,8 +184,12 @@ page_fault (struct intr_frame *f)
 
   // 如果尝试向未分配的栈区域中读取数据, 必然是错误的!
   // 能进入page fault handler就说明其访问了未分配的区域
+  // 也有可能已经分配, 但页面被swap到磁盘中了
   if (role == SEG_STACK && !write)
-    syscall_exit(f, -1);
+  {
+    if (page_seek(cur, fault_addr) == NULL)
+      syscall_exit(f, -1);
+  }
 
   //用户进程尝试向CODE段与DATA段中写入数据, 必然是错误的!
   //注意, 我们要保证此时不在加载exe

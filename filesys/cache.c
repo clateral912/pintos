@@ -192,7 +192,7 @@ cache_fill(block_sector_t disk_sector, bool is_inode, bool if_read)
   }
   hash_insert(&cache_hashmap, &centry->helem);
   //debug only
-  ASSERT(centry->helem.list_elem.prev != NULL);
+  // ASSERT(centry->helem.list_elem.prev != NULL);
   free(buffer);
   // TODO: 添加返回false的情况!
   return centry;
@@ -223,6 +223,7 @@ cache_writeback_all(void)
     if (!cnode->is_inode_sector)
       cache_writeback(cnode);
   }
+  // printf("Finished cache writeback all!\n");
 }
 
 // 从cache中读取某块数据

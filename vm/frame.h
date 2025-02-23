@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 extern uint32_t frame_cnt;
+extern struct lock flist_lock;
 // flags = 0, 说明生成的页面RW, 不zero, 可驱逐, 不sharing
 #define FRM_RW 0
 #define FRM_RO 1
