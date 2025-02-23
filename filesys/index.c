@@ -1,3 +1,4 @@
+#include "index.h"
 #include "inode.h"
 #include "cache.h"
 #include "off_t.h"
@@ -67,7 +68,7 @@ index_where_the_sector(off_t length, uint8_t *level, uint8_t *idx1, uint8_t *idx
     // 比如sector = 129, 那它位于第二级间接块的第0个entry, 第一级间接块的第1个entry
     *level = 2;
     *idx1 = (sectors - 1) / INDIRECT_PER_BLOCK;
-    *idx2 = (sectors - INDIRECT_PER_BLOCK * (*idx1) - 1);
+    *idx2 = (sectors - 1) % INDIRECT_PER_BLOCK;
     return ;
   }
   else
@@ -104,6 +105,8 @@ index_extend(struct inode_disk *data, off_t new_length)
         index_allocate_single_sector(&data->indirect);
       // 读取第一级间接块目录
       block_sector_t *table = calloc(1, BLOCK_SECTOR_SIZE);
+      ASSERT(table != NULL);
+
       cache_read(data->indirect, table, true);
 
       ASSERT(table[idx1] == 0);
@@ -119,13 +122,17 @@ index_extend(struct inode_disk *data, off_t new_length)
         index_allocate_single_sector(&data->double_indirect);
       // 读取第二级间接块目录
       block_sector_t *table2 = calloc(1, BLOCK_SECTOR_SIZE);
+      ASSERT(table2 != NULL);
+
       cache_read(data->double_indirect, table2, true);
+      // 获取一级间接块的扇区编号
       block_sector_t table1_sector = table2[idx1];
       // 如果尚未分配第一级间接块目录
       if (table1_sector == 0)
         index_allocate_single_sector(&(table2[idx1]));
       // 读取第一级间接块目录
       block_sector_t *table1 = calloc(1, BLOCK_SECTOR_SIZE);
+      ASSERT(table1 != NULL);
       
       ASSERT(table1[idx2] == 0);
       index_allocate_single_sector(&(table1[idx2]));
@@ -139,5 +146,63 @@ index_extend(struct inode_disk *data, off_t new_length)
       PANIC("Unknown level!");
     }
   }    
+  //更新文件的长度
+  data->length = new_length;
   return true;
+}
+
+// 释放文件持有的所有sector
+void
+index_relese_sectors(struct inode_disk *data)
+{
+  // 释放直接块
+  for (int i = 0; i < DIRECT_BLOCKS && data->direct[i] != 0; i++)
+    free_map_release(data->direct[i], 1);
+
+  // 下面释放间接块
+  // 如果文件压根没用到第一级间接块
+  if (data->indirect == 0)
+    return ;
+  // 读取第一级间接块
+  block_sector_t *indirect_table = calloc(1, BLOCK_SECTOR_SIZE);
+  ASSERT(indirect_table != NULL);
+  cache_read(data->indirect, indirect_table, true);
+
+  // 释放第一级间接块指向的所有扇区
+  for (int i = 0; i < INDIRECT_PER_BLOCK && indirect_table[i] != 0; i++)
+    free_map_release(indirect_table[i], 1);
+
+  free(indirect_table);
+  //释放第一级间接块本身
+  free_map_release(data->indirect, 1);
+
+  // 释放第二级间接块
+  // 如果文件压根没用到第二级间接块
+  if (data->double_indirect == 0)
+    return ;
+
+  block_sector_t *double_indirect_table = calloc(1, BLOCK_SECTOR_SIZE);
+  ASSERT(double_indirect_table != NULL);
+  cache_read(data->double_indirect, double_indirect_table, true);
+
+  // 遍历第二级间接块内指向的所有第一级间接块
+  for (int i = 0; i < INDIRECT_PER_BLOCK && double_indirect_table[i] != 0; i++)
+  {
+    // 读取指向的第一级间接块
+    block_sector_t *table1 = calloc(1, BLOCK_SECTOR_SIZE);
+    ASSERT(table1 != NULL);
+    cache_read(double_indirect_table[i], table1, true);
+
+    // 释放第一级间接块指向的所有扇区
+    for (int j = 0; j < INDIRECT_PER_BLOCK && table1[j] != 0; j++)
+      free_map_release(table1[j], 1);
+
+    free(table1);
+    // 释放第一级间接块本身
+    free_map_release(double_indirect_table[i], 1);
+  }
+
+  free(double_indirect_table);
+  // 释放第二级间接块本身
+  free_map_release(data->double_indirect, 1);
 }

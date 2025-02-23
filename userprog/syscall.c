@@ -80,7 +80,9 @@ syscall_create(struct intr_frame *f)
   if (!is_user_vaddr(name) || name == NULL)
     syscall_exit(f, FORCE_EXIT);
 
+  lock_acquire(&filesys_lock);
   bool success = filesys_create(name, initial_size);
+  lock_release(&filesys_lock);
   
   retval(f, success);
 }
@@ -93,7 +95,9 @@ syscall_remove(struct intr_frame *f)
   if (!is_user_vaddr(file) || file == NULL)
     syscall_exit(f, -1);
 
+  lock_acquire(&filesys_lock);
   bool success = filesys_remove(file);
+  lock_release(&filesys_lock);
   retval(f, success);
 }
 
@@ -111,7 +115,9 @@ syscall_seek(struct intr_frame *f)
   if (file == NULL)
     return ;
 
+  lock_acquire(&filesys_lock);
   file_seek(file, pos);
+  lock_release(&filesys_lock);
 }
 
 static void
@@ -123,7 +129,9 @@ syscall_tell(struct intr_frame *f)
   if (file == NULL)
     return ;
 
+  lock_acquire(&filesys_lock);
   uint32_t pos = file_tell(file);
+  lock_release(&filesys_lock);
   retval(f, pos);
 }
 
@@ -153,7 +161,9 @@ syscall_open(struct intr_frame *f)
     return ;
   }
 
+  lock_acquire(&filesys_lock);
   struct file *file = filesys_open(file_name);
+  lock_release(&filesys_lock);
   // file==NULL的情况有内部内存分配错误, 以及未找到文件
   // 未找到文件的情况在此处处理
   // TODO: 逻辑漏洞! 如果是内部内存错误怎么办?
@@ -191,7 +201,9 @@ syscall_close(struct intr_frame *f)
     mnode->file = file_reopen(file);
   }
 
+  lock_acquire(&filesys_lock);
   file_close(file); 
+  lock_release(&filesys_lock);
   process_remove_fd_node(cur, fd);
   cache_writeback_all();
 }
@@ -248,7 +260,9 @@ syscall_read(struct intr_frame *f)
     retval(f, ERROR);
     return ;
   }
+  lock_acquire(&filesys_lock);
   size_t bytes = file_read(file, buffer, size);
+  lock_release(&filesys_lock);
   retval(f, bytes);
 }
 

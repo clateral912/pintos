@@ -1,7 +1,9 @@
 #include "inode.h"
+#include "index.h"
 #include <list.h>
 #include <debug.h>
 #include <round.h>
+#include <stdint.h>
 #include <string.h>
 #include "filesys.h"
 #include "free-map.h"
@@ -42,10 +44,35 @@ byte_to_sector (const struct inode *inode, off_t pos)
 {
   ASSERT (inode != NULL);
   struct inode_disk *data = cache_find_inode(inode->sector);
-  if (pos < data->length)
-    return data->start + pos / BLOCK_SECTOR_SIZE;
-  else
-    return -1;
+  uint8_t level, idx1, idx2;
+  block_sector_t *table1;
+  block_sector_t *table2;
+  block_sector_t table1_sector;
+  block_sector_t sector;
+
+  index_where_the_sector(pos, &level, &idx1, &idx2);
+  switch (level) {
+    case 0:
+      sector = data->direct[idx1];
+      break;
+    case 1:
+      table1 = calloc(1, BLOCK_SECTOR_SIZE);
+      cache_read(data->indirect, table1, true);
+      sector = table1[idx1];
+      free(table1);
+      break;
+    case 2:
+      table2 = calloc(1, BLOCK_SECTOR_SIZE);
+      table1 = calloc(1, BLOCK_SECTOR_SIZE);
+      cache_read(data->double_indirect, table2, true);
+      table1_sector = table2[idx1];
+      ASSERT(table1_sector != 0);
+      cache_read(table1_sector, table1, true);
+      sector = table1[idx2];
+      break;
+  }
+  ASSERT(sector != 0)
+  return sector;
 }
 
 /* List of open inodes, so that opening a single inode twice
@@ -82,23 +109,14 @@ inode_create (block_sector_t sector, off_t length)
   if (disk_inode != NULL)
     {
       // 初始化disk_inode的数据
-      size_t sectors = bytes_to_sectors (length);
-      disk_inode->length = length;
+      // 文件初始长度为0
+      disk_inode->length = 0;
       disk_inode->magic = INODE_MAGIC;
       // 为inode元数据分配扇区, free_map_allocate()中修改了inode的start位置
-      if (free_map_allocate (sectors, &disk_inode->start)) 
+      if (index_extend(disk_inode, length)) 
         {
-          // 将inode数据写入到磁盘中
+          // 将inode数据写入到磁盘中, 注意! 写入的不是文件数据!
           cache_write (sector, disk_inode, true);
-          // 将inode指向的数据区块全部设置为0
-          if (sectors > 0) 
-            {
-              static char zeros[BLOCK_SECTOR_SIZE];
-              size_t i;
-              
-              for (i = 0; i < sectors; i++) 
-                cache_write (disk_inode->start + i, zeros, false);
-            }
           success = true; 
         } 
       // 此时, disk_inode中的数据已经写入到了磁盘中,
@@ -128,7 +146,7 @@ inode_open (block_sector_t sector)
           struct inode_disk *data = cache_find_inode(inode->sector);
           // 违规的start值一定是其他进程尚未读取的
           // 让出CPU让其他进程执行完毕
-          while(data->start == 0xcccccccc)
+          while(data->indirect == 0xcccccccc)
             thread_yield();
 
           inode_reopen (inode);
@@ -150,7 +168,6 @@ inode_open (block_sector_t sector)
   inode->deny_write_cnt = 0;
   inode->removed = false;
   cache_read(inode->sector, data, true);
-  // block_read (fs_device, inode->sector, &inode->data);
   return inode;
 }
 
@@ -195,8 +212,7 @@ inode_close (struct inode *inode)
           // 先free这个inode本身存储的扇区(free元数据)
           free_map_release (inode->sector, 1);
           // 再free整个文件的内容
-          free_map_release (data->start,
-                            bytes_to_sectors (data->length)); 
+          index_relese_sectors(data);
         }
       free (inode); 
     }

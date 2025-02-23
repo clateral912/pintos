@@ -30,6 +30,8 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp, char *ar
 
 bool load_failed;
 struct lock load_failure_lock;
+
+
 // 为当前线程初始化堆栈
 // 根据args, 在栈上压入argc与agrv
 // 专门为main函数压栈
@@ -269,8 +271,10 @@ start_process (void *file_name_)
     thread_exit();
   
   // 保证当前正在执行的文件不会被其他进程修改 
+  lock_acquire(&filesys_lock);
   struct file* file = filesys_open(cur->name);
   file_deny_write(file);
+  lock_release(&filesys_lock);
   cur->exec_file = file;
 
   /* Start the user process by simulating a return from an
@@ -464,7 +468,9 @@ load (const char *file_name, void (**eip) (void), void **esp, char *args)
   process_activate ();
 
   /* Open executable file. */
+  lock_acquire(&filesys_lock);
   file = filesys_open (file_name);
+  lock_release(&filesys_lock);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -474,6 +480,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char *args)
   //保证加载成功才将当前进程的可执行文件设置成该文件
   //t->exec_file = file;
   /* Read and verify executable header. */
+  lock_acquire(&filesys_lock);
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
       || ehdr.e_type != 2
@@ -485,6 +492,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char *args)
       printf ("load: %s: error loading executable\n", file_name);
       goto done; 
     }
+  lock_release(&filesys_lock);
 
   /* Read program headers. */
   file_ofs = ehdr.e_phoff;
@@ -496,8 +504,11 @@ load (const char *file_name, void (**eip) (void), void **esp, char *args)
         goto done;
       file_seek (file, file_ofs);
 
+      lock_acquire(&filesys_lock);
       if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
         goto done;
+      lock_release(&filesys_lock);
+
       file_ofs += sizeof phdr;
       switch (phdr.p_type) 
         {
@@ -679,11 +690,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
       /* Load this page. */
+      lock_acquire(&filesys_lock);
       if (file_read (file, upage, page_read_bytes) != (int) page_read_bytes)
         {
           page_free_page(cur, upage);
           return false; 
         }
+      lock_release(&filesys_lock);
       memset (upage + page_read_bytes, 0, page_zero_bytes);
 
       // 读取后, 将需要只读的页面设置为只读

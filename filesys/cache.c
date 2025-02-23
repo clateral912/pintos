@@ -33,7 +33,7 @@ struct cache_sector_node
 
   bool is_inode_sector;
   uint8_t inode_entry_cnt;
-  struct hash_elem *inode_helem[64];
+  struct hash_elem *inode_helem[16];
   struct list_elem elem;
 };
 
