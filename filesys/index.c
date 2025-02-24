@@ -52,7 +52,7 @@ index_where_the_sector(off_t length, uint8_t *level, uint8_t *idx1, uint8_t *idx
   if (sectors >= MAX_FILE_SECTORS)
     PANIC("Too long File!\n");
 
-  if (sectors <= DIRECT_BLOCKS)
+  if (sectors < DIRECT_BLOCKS)
   {
     *level = 0;
     *idx1 = sectors;

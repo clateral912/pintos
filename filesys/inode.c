@@ -69,6 +69,8 @@ byte_to_sector (const struct inode *inode, off_t pos)
       ASSERT(table1_sector != 0);
       cache_read(table1_sector, table1, false);
       sector = table1[idx2];
+      free(table1);
+      free(table2);
       break;
   }
   if (inode->sector != 0)
