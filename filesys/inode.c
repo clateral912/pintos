@@ -314,12 +314,19 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
   uint8_t *bounce = NULL;
-
+  struct inode_disk data;
+  data = *(struct inode_disk *)cache_find_inode(inode->sector);
   if (inode->deny_write_cnt)
     return 0;
 
   while (size > 0) 
     {
+      // 如果向超出文件长度的offset写入数据, 那么扩展文件
+      if (size + offset > data.length)
+      {
+        index_extend(&data, offset + size);
+        cache_write(inode->sector, &data, true);
+      }
       /* Sector to write, starting byte offset within sector. */
       block_sector_t sector_idx = byte_to_sector (inode, offset);
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;

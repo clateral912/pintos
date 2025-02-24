@@ -78,23 +78,35 @@ index_where_the_sector(off_t length, uint8_t *level, uint8_t *idx1, uint8_t *idx
   }
 }
 
+// 延长文件
 bool
 index_extend(struct inode_disk *data, off_t new_length) 
 {
   off_t now_length = data->length;
-  uint8_t level, idx1, idx2;
-  
-  // 如果当前sector内还有空余空间, 那就不需要分配新的sector
-  if (ROUND_UP(now_length, BLOCK_SECTOR_SIZE) >= new_length)
-    return true;
 
-  while(now_length <= new_length)
+  // 计算现有和需要的扇区数目
+  size_t existing_sectors = DIV_ROUND_UP(now_length, BLOCK_SECTOR_SIZE);
+  size_t new_sectors = DIV_ROUND_UP(new_length, BLOCK_SECTOR_SIZE);
+  int delta = new_sectors - existing_sectors;
+
+  // 不需要新分配扇区的情况
+  if (delta <= 0) {
+      data->length = new_length;
+      return true;
+  }
+
+  for (int i = 0; i < delta; i++)
   {
-    // 获取下一个sector位于文件索引树的位置信息
-    index_where_the_sector(now_length, &level, &idx1, &idx2);
+    size_t sector_num = existing_sectors + i;
+    uint8_t level, idx1, idx2;
+    // 计算当前扇区号对应的索引位置
+    index_where_the_sector(sector_num * BLOCK_SECTOR_SIZE, &level, &idx1, &idx2);
     // 处理新的sector
     if (level == 0)
+    {
+      ASSERT(data->direct[idx1] == 0);
       index_allocate_single_sector(&data->direct[idx1]);
+    }
     else if (level == 1)
     {
       // 如果尚未分配第一级间接块目录
@@ -103,7 +115,6 @@ index_extend(struct inode_disk *data, off_t new_length)
       // 读取第一级间接块目录
       block_sector_t *table = calloc(1, BLOCK_SECTOR_SIZE);
       ASSERT(table != NULL);
-
       cache_read(data->indirect, table, false);
 
       ASSERT(table[idx1] == 0);
@@ -120,17 +131,17 @@ index_extend(struct inode_disk *data, off_t new_length)
       // 读取第二级间接块目录
       block_sector_t *table2 = calloc(1, BLOCK_SECTOR_SIZE);
       ASSERT(table2 != NULL);
-
       cache_read(data->double_indirect, table2, false);
-      // 获取一级间接块的扇区编号
-      block_sector_t table1_sector = table2[idx1];
+
       // 如果尚未分配第一级间接块目录, 并将修改后的table2写入磁盘
-      if (table1_sector == 0)
+      if (table2[idx1] == 0)
       {
         index_allocate_single_sector(&(table2[idx1]));
         cache_write(data->double_indirect, table2, false);
-        table1_sector = table2[idx1];
       }
+      // 获取一级间接块的扇区编号
+      block_sector_t table1_sector = table2[idx1];
+
       // 分配第一级间接块的内存空间
       block_sector_t *table1 = calloc(1, BLOCK_SECTOR_SIZE);
       ASSERT(table1 != NULL);
