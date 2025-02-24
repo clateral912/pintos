@@ -57,21 +57,24 @@ byte_to_sector (const struct inode *inode, off_t pos)
       break;
     case 1:
       table1 = calloc(1, BLOCK_SECTOR_SIZE);
-      cache_read(data->indirect, table1, true);
+      cache_read(data->indirect, table1, false);
       sector = table1[idx1];
       free(table1);
       break;
     case 2:
       table2 = calloc(1, BLOCK_SECTOR_SIZE);
       table1 = calloc(1, BLOCK_SECTOR_SIZE);
-      cache_read(data->double_indirect, table2, true);
+      cache_read(data->double_indirect, table2, false);
       table1_sector = table2[idx1];
       ASSERT(table1_sector != 0);
-      cache_read(table1_sector, table1, true);
+      cache_read(table1_sector, table1, false);
       sector = table1[idx2];
       break;
   }
-  ASSERT(sector != 0)
+  if (inode->sector != 0)
+  {
+    ASSERT(sector != 0)
+  }
   return sector;
 }
 
@@ -111,6 +114,9 @@ inode_create (block_sector_t sector, off_t length)
       // 初始化disk_inode的数据
       // 文件初始长度为0
       disk_inode->length = 0;
+      memset(disk_inode->direct, 0, sizeof(block_sector_t) * 5);
+      disk_inode->indirect = 0;
+      disk_inode->double_indirect = 0;
       disk_inode->magic = INODE_MAGIC;
       // 为inode元数据分配扇区, free_map_allocate()中修改了inode的start位置
       if (index_extend(disk_inode, length)) 

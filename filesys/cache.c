@@ -241,6 +241,9 @@ cache_read(block_sector_t disk_sector, void *buffer, bool is_inode)
   if (centry == NULL)
     centry = cache_fill(disk_sector, is_inode, true);
 
+  // 保证我们不会将一个inode节点当成普通文件来读取, 或者反之
+  ASSERT((is_inode ^ centry->is_inode) == 0)
+
   centry->cnode->accessed = true;
   cache_addr = centry->cache_addr;
 
@@ -264,6 +267,8 @@ cache_write(block_sector_t disk_sector, const void *buffer, bool is_inode)
   if (centry == NULL)
     centry = cache_fill(disk_sector, is_inode, false);
 
+  // 保证我们不会将一个inode节点当成普通文件来读取, 或者反之
+  ASSERT((is_inode ^ centry->is_inode) == 0)
   // 因为我们不可能将第一次写入缓存的inode写回到磁盘中(wirteback()不支持inode sector)
   // 因此我们对于inode要采用写穿(write through)策略: 在这里直接写入磁盘
   if (is_inode)

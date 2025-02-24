@@ -19,7 +19,7 @@ struct inode_disk
     block_sector_t indirect;
     block_sector_t double_indirect;
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[476];               /* Not used. */
+    uint32_t unused[119];               /* Not used. */
   };
 
 void inode_init (void);
