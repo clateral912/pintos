@@ -60,11 +60,10 @@ index_where_the_sector(off_t length, uint8_t *level, uint8_t *idx1, uint8_t *idx
     return ;
   }
   sectors -= DIRECT_BLOCKS;
-  if (sectors > INDIRECT_PER_BLOCK)
+  if (sectors >= INDIRECT_PER_BLOCK)
   {
     ASSERT(sectors > 0);
-    // 在执行下一步运算后, sector代表的含义就是要储存在第二级间接块中的扇区总数
-    sectors -= DIRECT_BLOCKS + INDIRECT_PER_BLOCK;
+    sectors -= INDIRECT_PER_BLOCK;
     *level = 2;
     *idx1 = sectors / INDIRECT_PER_BLOCK;
     *idx2 = sectors % INDIRECT_PER_BLOCK;
@@ -89,7 +88,7 @@ index_extend(struct inode_disk *data, off_t new_length)
   if (ROUND_UP(now_length, BLOCK_SECTOR_SIZE) >= new_length)
     return true;
 
-  while(now_length < new_length)
+  while(now_length <= new_length)
   {
     // 获取下一个sector位于文件索引树的位置信息
     index_where_the_sector(now_length, &level, &idx1, &idx2);
@@ -125,18 +124,26 @@ index_extend(struct inode_disk *data, off_t new_length)
       cache_read(data->double_indirect, table2, false);
       // 获取一级间接块的扇区编号
       block_sector_t table1_sector = table2[idx1];
-      // 如果尚未分配第一级间接块目录
+      // 如果尚未分配第一级间接块目录, 并将修改后的table2写入磁盘
       if (table1_sector == 0)
+      {
         index_allocate_single_sector(&(table2[idx1]));
-      // 读取第一级间接块目录
+        cache_write(data->double_indirect, table2, false);
+        table1_sector = table2[idx1];
+      }
+      // 分配第一级间接块的内存空间
       block_sector_t *table1 = calloc(1, BLOCK_SECTOR_SIZE);
       ASSERT(table1 != NULL);
       
+      // 读取第一级间接块目录
+      ASSERT(table1_sector != 0);
+      cache_read(table1_sector, table1, false);
+      // 确保idx2指向的位置尚未被分配
       ASSERT(table1[idx2] == 0);
+      // 分配存储文件的sector
       index_allocate_single_sector(&(table1[idx2]));
-      // 将修改后的table写入磁盘
-      cache_write(data->double_indirect, table2, false);
-      cache_write(table2[idx1], table1, false);
+      // 将修改后的table1写入磁盘
+      cache_write(table1_sector, table1, false);
       free(table2);
       free(table1);
     }
