@@ -243,11 +243,15 @@ off_t
 inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset) 
 {
   uint8_t *buffer = buffer_;
+  off_t length = inode_length(inode);
   off_t bytes_read = 0;
   uint8_t *bounce = NULL;
 
   while (size > 0) 
     {
+      // 不能尝试读取EOF之后的内容
+      if (offset >= length)
+        break;
       /* Disk sector to read, starting byte offset within sector. */
       // 先获取数据所在的扇区
       block_sector_t sector_idx = byte_to_sector (inode, offset);
