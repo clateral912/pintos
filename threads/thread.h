@@ -6,6 +6,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "synch.h"
+#include "../devices/block.h"
 #include "../filesys/filesys.h"
 #include "../filesys/file.h"
 
@@ -151,6 +152,7 @@ struct thread
     int priority;                       /* Priority. */
     int base_priority;
     int64_t wake_time;
+    block_sector_t wd;
     struct list_elem allelem;           /* List element for all threads list. */
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

@@ -2,6 +2,7 @@
 #define FILESYS_INODE_H
 
 #include <stdbool.h>
+#include <list.h>
 #include "off_t.h"
 #include "../devices/block.h"
 
@@ -20,6 +21,17 @@ struct inode_disk
     block_sector_t double_indirect;
     unsigned magic;                     /* Magic number. */
     uint32_t unused[119];               /* Not used. */
+  };
+
+/* In-memory inode. */
+struct inode 
+  {
+    struct list_elem elem;              /* Element in inode list. */
+    block_sector_t sector;              /* Sector number of disk location. */
+    int open_cnt;                       /* Number of openers. */
+    bool removed;                       /* True if deleted, false otherwise. */
+    bool is_dir;                        /* True if this inode points to a directory*/
+    int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
   };
 
 void inode_init (void);

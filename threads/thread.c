@@ -860,6 +860,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->intr_stack = NULL;
   t->magic = THREAD_MAGIC;
 
+  t->wd = ROOT_DIR_SECTOR;
+
   t->base_priority = priority;
   t->priority = priority;
   t->lock_cnt = 0;

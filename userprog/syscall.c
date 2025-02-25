@@ -1,5 +1,6 @@
 #include "syscall.h"
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include "../devices/shutdown.h"
 #include "../devices/input.h"
@@ -9,8 +10,12 @@
 #include <syscall-nr.h>
 #include "../threads/thread.h"
 #include "../threads/vaddr.h"
+#include "../threads/malloc.h"
 #include "../filesys/filesys.h"
+#include "../filesys/directory.h"
+#include "../filesys/free-map.h"
 #include "../filesys/cache.h"
+#include "../filesys/inode.h"
 #include "../vm/frame.h"
 #include "../vm/page.h"
 #include "../vm/virtual-memory.h"
@@ -35,6 +40,11 @@ static void syscall_close(struct intr_frame *);
 static void syscall_filesize(struct intr_frame *);
 static void syscall_exec(struct intr_frame *);
 static void syscall_wait(struct intr_frame *);
+static void syscall_mkdir(struct intr_frame *);
+static void syscall_chdir(struct intr_frame *);
+static void syscall_isdir(struct intr_frame *);
+static void syscall_readdir(struct intr_frame *);
+static void syscall_inumber(struct intr_frame *);
 
 // arg0 位于栈中的低地址
 struct syscall_frame_3args{
@@ -66,6 +76,45 @@ retval(struct intr_frame *f, int32_t num)
   f->eax = num;  
 }
 
+// 将一个路径分割为最后一个文件名以及其前面的路径(以最后一个slash作为分隔)
+// 只是简单的将filename和directory指针放在path字符串的适当位置上, 避免strcpy
+// 比如path = "/dev/proc/some/file" 
+// 那么 directory = "/dev/proc/some", filename = "file"
+void separate_path (char *path, char **directory, char **filename) 
+{
+  uint16_t len = strlen(path);
+  // 如果path为空
+  if (!len) return ;
+  // 处理根目录
+  if (len == 1) 
+  {
+    *directory = *path == '/' ? path : NULL;
+    *filename = *path == '/' ? NULL : path;
+    return ;
+  }
+
+  char *last_slash = strrchr(path, '/'); 
+  // 如果最后一个slash在path的末尾
+  if (strlen(last_slash) == 1)
+  {  
+    *directory = path;
+    *filename = NULL;
+    return ;
+  }
+
+  if (!last_slash) 
+  {
+    *filename = path;
+    *directory = NULL;     // directory为0说明是相对目录
+  }
+  else 
+  {
+    // 将最后一个slash作为directory的字符串终止符"\0"
+    *last_slash = 0;
+    *directory = path;
+    *filename = last_slash + 1;
+  }
+}
 
 static void
 syscall_create(struct intr_frame *f)
@@ -264,6 +313,98 @@ syscall_read(struct intr_frame *f)
   size_t bytes = file_read(file, buffer, size);
   lock_release(&filesys_lock);
   retval(f, bytes);
+}
+
+static void 
+syscall_isdir(struct intr_frame *f)
+{
+  uint32_t fd = *get_args(f);
+  struct file *file = process_from_fd_get_file(thread_current(), fd);
+  if (file == NULL)
+  {
+    retval(f, false);
+    return ;
+  }
+  bool is_dir = file->inode->is_dir ? true : false;
+  retval(f, is_dir);
+}
+
+static void
+syscall_chdir(struct intr_frame *f)
+{
+  const char *dir = (const char *)(*get_args(f));
+  block_sector_t dir_sector = 0;
+  dir_sector = dir_parse(thread_current()->wd, dir);
+  if (dir_sector == 0)
+  {
+    retval(f, false);
+    return ;
+  }
+  thread_current()->wd = dir_sector;
+  retval(f, true);
+}
+
+static void
+syscall_readdir(struct intr_frame *f)
+{
+  struct syscall_frame_2args *args = (struct syscall_frame_2args *)get_args(f);
+  uint32_t fd = args->arg0;
+  char *name = (char *)args->arg1;
+
+  struct file *file = process_from_fd_get_file(thread_current(), fd);
+  struct dir *dir = dir_open(file->inode);
+  bool success = dir_readdir(dir, name);
+  dir_close(dir);
+
+  retval(f, success);
+}
+
+static void
+syscall_inumber(struct intr_frame *f)
+{
+  uint32_t fd = *get_args(f);
+  struct file *file = process_from_fd_get_file(thread_current(), fd);
+
+  retval(f, file->inode->sector);
+}
+
+static void
+syscall_mkdir(struct intr_frame *f)
+{
+  const char *dir_ = (char *)(*get_args(f));
+  struct inode* inode = NULL;
+  struct dir *path = NULL;
+  block_sector_t *new_dir_sector = malloc(sizeof(block_sector_t));
+  bool success = false;
+  char *dir = malloc(strlen(dir_) + 1);
+  if (!new_dir_sector || !dir) goto done;
+  if (!dir_) goto done;
+  strlcpy(dir, dir_, strlen(dir_) + 1);
+
+
+  char *filename = NULL;
+  char *directory = NULL;
+
+  separate_path(dir, &directory, &filename);
+  if (!filename) goto done;
+  block_sector_t dir_inode_sector = dir_parse(thread_current()->wd, directory == NULL ? "." :directory);
+  if (!dir_inode_sector) goto done;
+
+  inode = inode_open(dir_inode_sector);
+  path = dir_open(inode);
+  if(!(inode && path && inode->is_dir)) goto done;
+
+  free_map_allocate(1, new_dir_sector);
+  success = dir_add(path, filename, *new_dir_sector);
+
+
+
+done:
+  if (path) dir_close(path);
+  free(dir);
+  free(path);
+  retval(f, success);
+  return ;
 }
 
 static void
@@ -482,6 +623,21 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_MUNMAP:
       syscall_munmap(f);
+      break;
+    case SYS_READDIR:
+      syscall_readdir(f);
+      break;
+    case SYS_CHDIR:
+      syscall_chdir(f);
+      break;
+    case SYS_MKDIR:
+      syscall_mkdir(f);
+      break;
+    case SYS_INUMBER:
+      syscall_inumber(f);
+      break;
+    case SYS_ISDIR:
+      syscall_isdir(f);
       break;
     default:
       printf("Unknown syscall number! Killing process...\n");

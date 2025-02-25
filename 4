@@ -6,7 +6,6 @@
 #include "filesys.h"
 #include "inode.h"
 #include "../threads/malloc.h"
-#include "stdbool.h"
 
 /* A directory. */
 struct dir 
@@ -35,7 +34,9 @@ dir_parse(block_sector_t wd, const char *path_)
   block_sector_t ret = 0;
   uint32_t path_len = strlen(path_) + 1; 
   char *path = malloc(path_len);
-  if (path == NULL) goto done;
+  if (path == NULL)
+    return 0;
+
   char *token, *save_ptr;
   struct dir *dir = NULL;
 
@@ -45,35 +46,28 @@ dir_parse(block_sector_t wd, const char *path_)
   bool relative = (*path != '/');
   // 是否为相对路径
   struct inode *inode = relative ? inode_open(wd) : inode_open(ROOT_DIR_SECTOR);
-  if (inode == NULL) goto done;
+  if (!inode) goto done;
   dir = dir_open(inode);
-  if (dir == NULL) goto done;
+  if (!dir) goto done;
 
   // 逐个解码path
-  // 如果path = "/"(根目录), 不会进入for循环
-  // strtok_r的实现保证了不会有任何token的长度为0, 可以自适应"a///b/c"的情况
   for (token = strtok_r (path, "/", &save_ptr); token != NULL;
         token = strtok_r (NULL, "/", &save_ptr))
   {
     // 前一次循环无法打开dir, 而又运行到了这一次循环
     // 说明path没到头, 而上一个token已经不是directory了(因为dir是NULL),
     // 是错误的, 应该返回0
-    if(dir == NULL) goto done;
-    // 每次lookup都会打开新的inode, 如果能找到文件的话
+    if(dir == NULL)
+      return 0;
+
     dir_lookup(dir, token, &inode); 
-    // dir已经在lookup中用完了, 需要手动关闭
-    // 注意, dir_close也同时关闭了旧的inode
-    dir_close(dir);
-    dir = NULL;
     // 如果在path中找不到名为token的文件, 那么也返回0
     if (inode == NULL) goto done;
-    // 这里的inode是在lookup中找到的新inode
+
     dir = dir_open(inode);
   }
-  // 得到返回值
   ret = inode->sector;
 done:
-  if (dir) dir_close(dir);
   free(path);
   return ret;
 }
@@ -94,7 +88,6 @@ dir_create (block_sector_t sector, block_sector_t prev, size_t entry_cnt)
   return true;
 }
 
-
 /* Opens and returns the directory for the given INODE, of which
    it takes ownership.  Returns a null pointer on failure. */
 // 为dir分配内存空间, 并将传入的inode设置为dir的inode
@@ -104,8 +97,10 @@ dir_open (struct inode *inode)
 {
   // calloc(a, b)分配a * b bytes的内存
   struct dir *dir = calloc (1, sizeof *dir);
+  if (!inode->is_dir)
+    return NULL;
 
-  if (inode != NULL && dir != NULL && inode->is_dir)
+  if (inode != NULL && dir != NULL)
     {
       dir->inode = inode;
       dir->pos = 0;
