@@ -32,14 +32,17 @@ struct dir_entry
 block_sector_t
 dir_parse(block_sector_t wd, const char *path_)
 {
+  // 如果传入的空path或path指针为0
+  if (!path_ && !strlen(path_))
+    return wd;
+
   block_sector_t ret = 0;
   uint32_t path_len = strlen(path_) + 1; 
-  char *path = malloc(path_len);
-  if (path == NULL) goto done;
+  char path[64];
   char *token, *save_ptr;
   struct dir *dir = NULL;
 
-  memcpy(path, path_, path_len);
+  strlcpy(path, path_, path_len);
 
   // 如果path的首位为"/"
   bool relative = (*path != '/');
@@ -67,15 +70,16 @@ dir_parse(block_sector_t wd, const char *path_)
     dir = NULL;
     // 如果在path中找不到名为token的文件, 那么也返回0
     if (inode == NULL) goto done;
+    ret = inode->sector;
     // 这里的inode是在lookup中找到的新inode
     dir = dir_open(inode);
   }
   // 得到返回值
-  ret = inode->sector;
+  if (dir) dir_close(dir);
+  return ret;
 done:
   if (dir) dir_close(dir);
-  free(path);
-  return ret;
+  return 0;
 }
 
 /* Creates a directory with space for ENTRY_CNT entries in the

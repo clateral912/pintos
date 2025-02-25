@@ -272,7 +272,7 @@ start_process (void *file_name_)
   
   // 保证当前正在执行的文件不会被其他进程修改 
   lock_acquire(&filesys_lock);
-  struct file* file = filesys_open(cur->name);
+  struct file *file = filesys_open(ROOT_DIR_SECTOR, cur->name);
   file_deny_write(file);
   lock_release(&filesys_lock);
   cur->exec_file = file;
@@ -469,7 +469,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char *args)
 
   /* Open executable file. */
   lock_acquire(&filesys_lock);
-  file = filesys_open (file_name);
+  file = filesys_open (ROOT_DIR_SECTOR, file_name);
   lock_release(&filesys_lock);
   if (file == NULL) 
     {

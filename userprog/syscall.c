@@ -84,7 +84,12 @@ void separate_path (char *path, char **directory, char **filename)
 {
   uint16_t len = strlen(path);
   // 如果path为空
-  if (!len) return ;
+  if (!len) 
+  {
+    *directory = NULL;
+    *filename = NULL;
+    return ;
+  }
   // 处理根目录
   if (len == 1) 
   {
@@ -95,7 +100,8 @@ void separate_path (char *path, char **directory, char **filename)
 
   char *last_slash = strrchr(path, '/'); 
   // 如果最后一个slash在path的末尾
-  if (strlen(last_slash) == 1)
+  // 且last_slash不为NULL
+  if (last_slash && strlen(last_slash) == 1)
   {  
     *directory = path;
     *filename = NULL;
@@ -123,16 +129,28 @@ syscall_create(struct intr_frame *f)
 
   struct syscall_frame_2args* args = (struct syscall_frame_2args *)args_ptr;
   
-  const char *name = (char *)args->arg0;
+  const char *name_ = (char *)args->arg0;
   uint32_t initial_size = args->arg1;
+  bool success = false;
 
-  if (!is_user_vaddr(name) || name == NULL)
+  if (!is_user_vaddr(name_) || name_ == NULL)
     syscall_exit(f, FORCE_EXIT);
+  if (strlen(name_) > 64) goto done;
+
+  char path_to_name[64];
+  char *filename, *directory;
+  strlcpy(path_to_name, name_, strlen(name_) + 1);
+
+  separate_path(path_to_name, &directory, &filename);
+  if (!filename) goto done;
+  block_sector_t dir_sector = dir_parse(thread_current()->wd, directory);
+  if (!dir_sector) goto  done;
 
   lock_acquire(&filesys_lock);
-  bool success = filesys_create(name, initial_size);
+  success = filesys_create(dir_sector, filename, initial_size);
   lock_release(&filesys_lock);
-  
+
+done:
   retval(f, success);
 }
 
@@ -211,7 +229,7 @@ syscall_open(struct intr_frame *f)
   }
 
   lock_acquire(&filesys_lock);
-  struct file *file = filesys_open(file_name);
+  struct file *file = filesys_open(thread_current()->wd, file_name);
   lock_release(&filesys_lock);
   // file==NULL的情况有内部内存分配错误, 以及未找到文件
   // 未找到文件的情况在此处处理
