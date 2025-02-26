@@ -33,10 +33,9 @@ block_sector_t
 dir_parse(block_sector_t wd, const char *path_)
 {
   // 如果传入的空path或path指针为0
-  if (!path_ && !strlen(path_))
+  if (!path_ || !strlen(path_))
     return wd;
 
-  block_sector_t ret = 0;
   uint32_t path_len = strlen(path_) + 1; 
   char path[64];
   char *token, *save_ptr;
@@ -46,6 +45,7 @@ dir_parse(block_sector_t wd, const char *path_)
 
   // 如果path的首位为"/"
   bool relative = (*path != '/');
+  block_sector_t ret = relative ? 0 : ROOT_DIR_SECTOR;
   // 是否为相对路径
   struct inode *inode = relative ? inode_open(wd) : inode_open(ROOT_DIR_SECTOR);
   if (inode == NULL) goto done;
@@ -85,16 +85,17 @@ done:
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
 bool
-dir_create (block_sector_t sector, block_sector_t prev, size_t entry_cnt)
+dir_create (block_sector_t sector, block_sector_t prev, const char *name, size_t entry_cnt)
 {
-  if(!inode_create (sector, entry_cnt * sizeof (struct dir_entry)))
+  if(!inode_create (sector, entry_cnt * sizeof (struct dir_entry), true))
     return false;
   struct inode *new_inode = inode_open(sector);
   ASSERT(new_inode != NULL);
-  new_inode->is_dir = true;
   struct dir *new_dir = dir_open(new_inode);
+  struct dir *prev_dir = dir_open(inode_open(prev));
   dir_add(new_dir, ".", sector);
   dir_add(new_dir, "..", prev);
+  dir_add(prev_dir, name, sector);
   return true;
 }
 
@@ -109,7 +110,7 @@ dir_open (struct inode *inode)
   // calloc(a, b)分配a * b bytes的内存
   struct dir *dir = calloc (1, sizeof *dir);
 
-  if (inode != NULL && dir != NULL && inode->is_dir)
+  if (inode != NULL && dir != NULL && inode_is_dir(inode))
     {
       dir->inode = inode;
       dir->pos = 0;
@@ -316,9 +317,21 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
       dir->pos += sizeof e;
       if (e.in_use)
         {
+          if (!strcmp(e.name, ".") || !strcmp(e.name, ".."))
+            continue;
+
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;
         } 
     }
   return false;
+}
+
+bool
+dir_is_empty(struct dir *dir)
+{
+  char *name = malloc(NAME_MAX + 1);
+  bool is_empty = dir_readdir(dir, name);
+  free(name);
+  return is_empty;
 }

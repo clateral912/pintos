@@ -88,7 +88,7 @@ inode_init (void)
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (block_sector_t sector, off_t length)
+inode_create (block_sector_t sector, off_t length, bool is_dir)
 {
   struct inode_disk *disk_inode = NULL;
   bool success = false;
@@ -111,6 +111,7 @@ inode_create (block_sector_t sector, off_t length)
       disk_inode->indirect = 0;
       disk_inode->double_indirect = 0;
       disk_inode->magic = INODE_MAGIC;
+      disk_inode->is_dir = is_dir;
       // 为inode元数据分配扇区, free_map_allocate()中修改了inode的start位置
       if (index_extend(disk_inode, length)) 
         {
@@ -402,3 +403,11 @@ inode_length (const struct inode *inode)
   struct inode_disk *data = cache_find_inode(inode->sector);
   return data->length;
 }
+
+bool
+inode_is_dir(const struct inode *inode)
+{
+  struct inode_disk *data = cache_find_inode(inode->sector);
+  return data->is_dir;
+}
+

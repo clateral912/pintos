@@ -58,7 +58,7 @@ filesys_create (block_sector_t dir_sector, const char *name, off_t initial_size)
   struct dir *dir = dir_open(inode_open(dir_sector));
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size)
+                  && inode_create (inode_sector, initial_size, false)
                   && dir_add (dir, name, inode_sector));
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
@@ -90,9 +90,9 @@ filesys_open (block_sector_t dir_sector, const char *name)
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 bool
-filesys_remove (const char *name) 
+filesys_remove (block_sector_t dir_sector, const char *name) 
 {
-  struct dir *dir = dir_open_root ();
+  struct dir *dir = dir_open(inode_open(dir_sector));
   bool success = dir != NULL && dir_remove (dir, name);
   dir_close (dir); 
 
@@ -106,7 +106,7 @@ do_format (void)
 {
   printf ("Formatting file system...");
   free_map_create ();
-  if (!dir_create (ROOT_DIR_SECTOR, ROOT_DIR_SECTOR, 16))
+  if (!dir_create (ROOT_DIR_SECTOR, ROOT_DIR_SECTOR, "root",16))
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");

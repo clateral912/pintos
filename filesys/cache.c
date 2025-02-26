@@ -17,6 +17,7 @@
 
 struct inode_cache_entry
 {
+    bool is_dir;
     off_t length;                       
     block_sector_t direct[5];               
     block_sector_t indirect;

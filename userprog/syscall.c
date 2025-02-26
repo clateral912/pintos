@@ -94,7 +94,12 @@ void separate_path (char *path, char **directory, char **filename)
   if (len == 1) 
   {
     *directory = *path == '/' ? path : NULL;
-    *filename = *path == '/' ? NULL : path;
+    *filename = *path == '/' ? (path + 2) : path;
+    if (*path == '/')
+    {
+      **filename = '.';
+      *(*filename + 1) = 0;
+    }
     return ;
   }
 
@@ -122,6 +127,7 @@ void separate_path (char *path, char **directory, char **filename)
   }
 }
 
+// TODO: 未实现不支持同名文件!
 static void
 syscall_create(struct intr_frame *f)
 {
@@ -157,14 +163,38 @@ done:
 static void
 syscall_remove(struct intr_frame *f)
 {
-  const char *file = (const char *)(*get_args(f));
+  const char *file_name = (const char *)(*get_args(f));
 
-  if (!is_user_vaddr(file) || file == NULL)
+  char *directory, *filename;
+  char *path_to_name = malloc(strlen(file_name) + 1);
+  bool success = false;
+
+  if (!is_user_vaddr(file_name) || file_name == NULL)
+  {
+    free(path_to_name);
     syscall_exit(f, -1);
+  }
+
+  strlcpy(path_to_name, file_name, strlen(file_name) + 1);
+
+  separate_path(path_to_name, &directory, &filename);
+  if (!filename) goto done;
+  block_sector_t dir_sector = dir_parse(thread_current()->wd, directory);
+  if (!dir_sector) goto done;
+
+  // 判断是否是目录
+  struct dir *dir = dir_open(inode_open(dir_sector));
+  struct inode_disk *data = cache_find_inode(dir_sector);
+  if (data->is_dir && !dir_is_empty(dir))
+    goto done;
 
   lock_acquire(&filesys_lock);
-  bool success = filesys_remove(file);
+  success = filesys_remove(dir_sector, filename);
   lock_release(&filesys_lock);
+
+done:
+  dir_close(dir);
+  free(path_to_name);
   retval(f, success);
 }
 
@@ -220,7 +250,7 @@ syscall_filesize(struct intr_frame *f)
 static void
 syscall_open(struct intr_frame *f)
 {
-  uint32_t fd;
+  uint32_t fd = ERROR;
   const char *file_name = (const char *)(*get_args(f));
   if (!is_user_vaddr(file_name) || file_name == NULL)
   {
@@ -228,20 +258,27 @@ syscall_open(struct intr_frame *f)
     return ;
   }
 
+  char *directory, *filename;
+  char *path_to_name = malloc(strlen(file_name) + 1);
+  strlcpy(path_to_name, file_name, strlen(file_name) + 1);
+
+  separate_path(path_to_name, &directory, &filename);
+  if (!filename) goto done;
+  block_sector_t dir_sector = dir_parse(thread_current()->wd, directory);
+  if (!dir_sector) goto done;
+
   lock_acquire(&filesys_lock);
-  struct file *file = filesys_open(thread_current()->wd, file_name);
+  struct file *file = filesys_open(dir_sector, filename);
   lock_release(&filesys_lock);
   // file==NULL的情况有内部内存分配错误, 以及未找到文件
   // 未找到文件的情况在此处处理
   // TODO: 逻辑漏洞! 如果是内部内存错误怎么办?
   // 从测试点的逻辑倒推, 打开文件失败应该正常退出才对
   // 而不是把进程杀死
-  if (file == NULL)
-  {
-    retval(f, ERROR);
-    return ;
-  }
+  if (file == NULL) goto done;
   fd = process_create_fd_node(thread_current(), file);
+done:
+  free(path_to_name);
   retval(f, fd);
 }
 
@@ -343,7 +380,7 @@ syscall_isdir(struct intr_frame *f)
     retval(f, false);
     return ;
   }
-  bool is_dir = file->inode->is_dir ? true : false;
+  bool is_dir = inode_is_dir(file->inode);
   retval(f, is_dir);
 }
 
@@ -370,9 +407,8 @@ syscall_readdir(struct intr_frame *f)
   char *name = (char *)args->arg1;
 
   struct file *file = process_from_fd_get_file(thread_current(), fd);
-  struct dir *dir = dir_open(file->inode);
+  struct dir *dir = dir_open(inode_reopen(file->inode));
   bool success = dir_readdir(dir, name);
-  dir_close(dir);
 
   retval(f, success);
 }
@@ -390,13 +426,17 @@ static void
 syscall_mkdir(struct intr_frame *f)
 {
   const char *dir_ = (char *)(*get_args(f));
+
   struct inode* inode = NULL;
   struct dir *path = NULL;
   block_sector_t *new_dir_sector = malloc(sizeof(block_sector_t));
-  bool success = false;
   char *dir = malloc(strlen(dir_) + 1);
-  if (!new_dir_sector || !dir) goto done;
+  
   if (!dir_) goto done;
+  if (!new_dir_sector || !dir) goto done;
+  
+  bool success = false;
+
   strlcpy(dir, dir_, strlen(dir_) + 1);
 
 
@@ -408,14 +448,16 @@ syscall_mkdir(struct intr_frame *f)
   block_sector_t dir_inode_sector = dir_parse(thread_current()->wd, directory == NULL ? "." :directory);
   if (!dir_inode_sector) goto done;
 
-  inode = inode_open(dir_inode_sector);
-  path = dir_open(inode);
-  if(!(inode && path && inode->is_dir)) goto done;
+  // 如果当前文件夹下存在同名
+  struct dir *prev_dir = dir_open(inode_open(dir_inode_sector));
+  bool existed = dir_lookup(prev_dir, filename, &inode);
+  dir_close(prev_dir);
+  if (existed) goto done;
+    
 
   free_map_allocate(1, new_dir_sector);
-  success = dir_add(path, filename, *new_dir_sector);
-
-
+  dir_create(*new_dir_sector, dir_inode_sector, filename, 16);
+  success = true;
 
 done:
   if (path) dir_close(path);
@@ -516,11 +558,10 @@ syscall_write(struct intr_frame *f)
   uint32_t fd = args->arg0;
   void *buffer = (void *)args->arg1;
   size_t size = args->arg2;
+  int32_t bytes = -1;
 
   // 向stdin中写入是不可行的!
-  if (fd == 0)
-    return ;
-
+  if (fd == 0) goto done;
   // 仅对printf做初步的支持
   if (fd == 1)
   {
@@ -529,11 +570,13 @@ syscall_write(struct intr_frame *f)
   }
 
   struct file *file = process_from_fd_get_file(thread_current(), fd);
-  if (file == NULL)
-    return ;
 
-  size_t bytes = file_write(file, buffer, size);
+  if (file == NULL || inode_is_dir(file->inode))
+    goto done;
 
+  bytes = file_write(file, buffer, size);
+
+done:
   retval(f, bytes);
 }
 
