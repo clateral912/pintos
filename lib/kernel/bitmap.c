@@ -355,6 +355,8 @@ bitmap_file_size (const struct bitmap *b)
   return byte_cnt (b->bit_cnt);
 }
 
+#ifdef FILESYS
+
 /* Reads B from FILE.  Returns true if successful, false
    otherwise. */
 bool
@@ -381,7 +383,7 @@ bitmap_write (const struct bitmap *b, struct file *file)
 }
 
 /* Debugging. */
-
+#endif /* ifdef FILESYS */
 /* Dumps the contents of B to the console as hexadecimal. */
 // 将bitmap转化为16进制并打印出来
 // 注意! 它调用了printf !

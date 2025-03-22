@@ -131,13 +131,13 @@ pintos_init (void)
   filesys_init (format_filesys);
 #endif
   
+#ifdef VM
   // VM部分初始化
   page_init();
   frame_init();
   swap_init();
-
+#endif
   printf ("Boot complete.\n");
-  printf ("kituro from here!\n");
   
   finish_init = 1;
   thread_pri_sch = 1;
